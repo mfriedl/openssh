@@ -95,8 +95,6 @@
 /mac.h/1.6/Thu Jun  7 19:37:34 2007//
 /match.c/1.27/Tue Jun 10 23:06:19 2008//
 /match.h/1.15/Fri Feb 26 20:29:54 2010//
-/misc.c/1.85/Tue Mar 29 18:54:17 2011//
-/misc.h/1.48/Tue Mar 29 18:54:17 2011//
 /moduli.c/1.22/Wed Nov 10 01:33:07 2010//
 /monitor.c/1.110/Thu Sep  9 10:45:45 2010//
 /monitor.h/1.15/Tue Nov  4 08:22:13 2008//
@@ -133,7 +131,6 @@
 /schnorr.h/1.1/Thu Mar  5 07:18:19 2009//
 /scp.1/1.56/Thu Dec  9 14:13:32 2010//
 /scp.c/1.170/Thu Dec  9 14:13:33 2010//
-/servconf.c/1.214/Tue Mar 29 18:54:17 2011//
 /servconf.h/1.95/Sat Nov 13 23:27:50 2010//
 /serverloop.c/1.159/Thu May 28 16:50:16 2009//
 /serverloop.h/1.6/Sat Mar 25 22:22:43 2006//
@@ -157,8 +154,6 @@
 /ssh-dss.c/1.27/Tue Aug 31 09:58:37 2010//
 /ssh-ecdsa.c/1.4/Fri Sep 10 01:04:10 2010//
 /ssh-gss.h/1.10/Tue Jun 12 08:20:00 2007//
-/ssh-keygen.1/1.104/Thu Mar 24 15:29:30 2011//
-/ssh-keygen.c/1.208/Thu Mar 24 22:14:54 2011//
 /ssh-keyscan.1/1.29/Tue Aug 31 11:54:45 2010//
 /ssh-keyscan.c/1.85/Tue Mar 15 10:36:02 2011//
 /ssh-keysign.8/1.12/Tue Aug 31 11:54:45 2010//
@@ -201,7 +196,6 @@
 /xmalloc.c/1.27/Thu Aug  3 03:34:42 2006//
 /xmalloc.h/1.13/Thu Aug  3 03:34:42 2006//
 D/lib////
-D/scard////
 D/scp////
 D/sftp////
 D/sftp-server////
@@ -213,3 +207,8 @@ D/ssh-keyscan////
 D/ssh-keysign////
 D/ssh-pkcs11-helper////
 D/sshd////
+/misc.c/1.85/Sat Apr 30 08:40:48 2011//
+/misc.h/1.48/Sat Apr 30 08:40:48 2011//
+/servconf.c/1.214/Sat Apr 30 08:40:48 2011//
+/ssh-keygen.1/1.104/Sat Apr 30 08:40:48 2011//
+/ssh-keygen.c/1.208/Sat Apr 30 08:40:48 2011//
