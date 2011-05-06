@@ -1,4 +1,4 @@
-/* $OpenBSD: log.h,v 1.17 2008/06/13 00:12:02 dtucker Exp $ */
+/* $OpenBSD: log.h,v 1.22 2017/05/17 01:24:17 djm Exp $ */
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -43,7 +43,12 @@ typedef enum {
 	SYSLOG_LEVEL_NOT_SET = -1
 }       LogLevel;
 
+typedef void (log_handler_fn)(LogLevel, const char *, void *);
+
 void     log_init(char *, LogLevel, SyslogFacility, int);
+int      log_change_level(LogLevel);
+int      log_is_on_stderr(void);
+void     log_redirect_stderr_to(const char *);
 
 SyslogFacility	log_facility_number(char *);
 const char * 	log_facility_name(SyslogFacility);
@@ -55,12 +60,18 @@ void     fatal(const char *, ...) __attribute__((noreturn))
 void     error(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     sigdie(const char *, ...)  __attribute__((noreturn))
     __attribute__((format(printf, 1, 2)));
+void     logdie(const char *, ...) __attribute__((noreturn))
+    __attribute__((format(printf, 1, 2)));
 void     logit(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     verbose(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     debug(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     debug2(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     debug3(const char *, ...) __attribute__((format(printf, 1, 2)));
 
+
+void	 set_log_handler(log_handler_fn *, void *);
+void	 do_log2(LogLevel, const char *, ...)
+    __attribute__((format(printf, 2, 3)));
 void	 do_log(LogLevel, const char *, va_list);
 void	 cleanup_exit(int) __attribute__((noreturn));
 #endif

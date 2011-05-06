@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect.h,v 1.27 2010/11/29 23:45:51 djm Exp $ */
+/* $OpenBSD: sshconnect.h,v 1.30 2017/05/30 08:52:19 markus Exp $ */
 
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
@@ -26,14 +26,14 @@
 
 typedef struct Sensitive Sensitive;
 struct Sensitive {
-	Key	**keys;
-	int	nkeys;
-	int	external_keysign;
+	struct sshkey	**keys;
+	int		nkeys;
+	int		external_keysign;
 };
 
-int
-ssh_connect(const char *, struct sockaddr_storage *, u_short, int, int,
-    int *, int, int, const char *);
+struct addrinfo;
+int	 ssh_connect(const char *, struct addrinfo *, struct sockaddr_storage *,
+    u_short, int, int, int *, int, int);
 void	 ssh_kill_proxy_command(void);
 
 void	 ssh_login(Sensitive *, const char *, struct sockaddr *, u_short,
@@ -41,7 +41,7 @@ void	 ssh_login(Sensitive *, const char *, struct sockaddr *, u_short,
 
 void	 ssh_exchange_identification(int);
 
-int	 verify_host_key(char *, struct sockaddr *, Key *);
+int	 verify_host_key(char *, struct sockaddr *, struct sshkey *);
 
 void	 get_hostfile_hostname_ipaddr(char *, struct sockaddr *, u_short,
     char **, char **);
@@ -54,6 +54,8 @@ void	 ssh_userauth2(const char *, const char *, char *, Sensitive *);
 
 void	 ssh_put_password(char *);
 int	 ssh_local_cmd(const char *);
+
+void	 maybe_add_key_to_agent(char *, struct sshkey *, char *, char *);
 
 /*
  * Macros to raise/lower permissions.

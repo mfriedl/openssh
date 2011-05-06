@@ -1,4 +1,4 @@
-/* $OpenBSD: auth2-kbdint.c,v 1.5 2006/08/03 03:34:41 deraadt Exp $ */
+/* $OpenBSD: auth2-kbdint.c,v 1.8 2017/05/30 14:29:59 markus Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
@@ -32,13 +32,14 @@
 #include "auth.h"
 #include "log.h"
 #include "buffer.h"
+#include "misc.h"
 #include "servconf.h"
 
 /* import */
 extern ServerOptions options;
 
 static int
-userauth_kbdint(Authctxt *authctxt)
+userauth_kbdint(struct ssh *ssh)
 {
 	int authenticated = 0;
 	char *lang, *devs;
@@ -50,10 +51,10 @@ userauth_kbdint(Authctxt *authctxt)
 	debug("keyboard-interactive devs %s", devs);
 
 	if (options.challenge_response_authentication)
-		authenticated = auth2_challenge(authctxt, devs);
+		authenticated = auth2_challenge(ssh, devs);
 
-	xfree(devs);
-	xfree(lang);
+	free(devs);
+	free(lang);
 	return authenticated;
 }
 
