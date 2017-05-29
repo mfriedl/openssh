@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor.c,v 1.169 2017/05/30 14:10:53 markus Exp $ */
+/* $OpenBSD: monitor.c,v 1.171 2017/05/31 10:04:29 markus Exp $ */
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * Copyright 2002 Markus Friedl <markus@openbsd.org>
@@ -1246,6 +1246,17 @@ mm_answer_term(int sock, Buffer *req)
 }
 
 void
+monitor_clear_keystate(struct monitor *pmonitor)
+{
+	struct ssh *ssh = active_state;	/* XXX */
+
+	ssh_clear_newkeys(ssh, MODE_IN);
+	ssh_clear_newkeys(ssh, MODE_OUT);
+	sshbuf_free(child_state);
+	child_state = NULL;
+}
+
+void
 monitor_apply_keystate(struct monitor *pmonitor)
 {
 	struct ssh *ssh = active_state;	/* XXX */
@@ -1304,9 +1315,18 @@ static void
 monitor_openfds(struct monitor *mon, int do_logfds)
 {
 	int pair[2];
+#ifdef SO_ZEROIZE
+	int on = 1;
+#endif
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == -1)
 		fatal("%s: socketpair: %s", __func__, strerror(errno));
+#ifdef SO_ZEROIZE
+	if (setsockopt(pair[0], SOL_SOCKET, SO_ZEROIZE, &on, sizeof(on)) < 0)
+		error("setsockopt SO_ZEROIZE(0): %.100s", strerror(errno));
+	if (setsockopt(pair[1], SOL_SOCKET, SO_ZEROIZE, &on, sizeof(on)) < 0)
+		error("setsockopt SO_ZEROIZE(1): %.100s", strerror(errno));
+#endif
 	FD_CLOSEONEXEC(pair[0]);
 	FD_CLOSEONEXEC(pair[1]);
 	mon->m_recvfd = pair[0];
