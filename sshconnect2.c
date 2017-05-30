@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect2.c,v 1.264 2017/06/14 00:31:38 dtucker Exp $ */
+/* $OpenBSD: sshconnect2.c,v 1.266 2017/08/27 00:38:41 dtucker Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Damien Miller.  All rights reserved.
@@ -887,7 +887,7 @@ int
 userauth_passwd(Authctxt *authctxt)
 {
 	static int attempt = 0;
-	char prompt[150];
+	char prompt[256];
 	char *password;
 	const char *host = options.host_key_alias ?  options.host_key_alias :
 	    authctxt->host;
@@ -927,7 +927,7 @@ input_userauth_passwd_changereq(int type, u_int32_t seqnr, struct ssh *ssh)
 {
 	Authctxt *authctxt = ssh->authctxt;
 	char *info, *lang, *password = NULL, *retype = NULL;
-	char prompt[150];
+	char prompt[256];
 	const char *host;
 
 	debug2("input_userauth_passwd_changereq");
@@ -1029,6 +1029,11 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
 	/* load the private key from the file */
 	if ((prv = load_identity_file(id)) == NULL)
 		return SSH_ERR_KEY_NOT_FOUND;
+	if (id->key != NULL && !sshkey_equal_public(prv, id->key)) {
+		error("%s: private key %s contents do not match public",
+		   __func__, id->filename);
+		return SSH_ERR_KEY_NOT_FOUND;
+	}
 	ret = sshkey_sign(prv, sigp, lenp, data, datalen,
 	    key_sign_encode(prv), compat);
 	sshkey_free(prv);

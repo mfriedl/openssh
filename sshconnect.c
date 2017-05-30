@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect.c,v 1.283 2017/07/01 13:50:45 djm Exp $ */
+/* $OpenBSD: sshconnect.c,v 1.287 2017/09/14 04:32:21 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -92,7 +92,7 @@ expand_proxy_command(const char *proxy_command, const char *user,
  * a connected fd back to us.
  */
 static int
-ssh_proxy_fdpass_connect(const char *host, u_short port,
+ssh_proxy_fdpass_connect(struct ssh *ssh, const char *host, u_short port,
     const char *proxy_command)
 {
 	char *command_string;
@@ -163,7 +163,8 @@ ssh_proxy_fdpass_connect(const char *host, u_short port,
 			fatal("Couldn't wait for child: %s", strerror(errno));
 
 	/* Set the connection file descriptors. */
-	packet_set_connection(sock, sock);
+	if (ssh_packet_set_connection(ssh, sock, sock) == NULL)
+		return -1; /* ssh_packet_set_connection logs error */
 
 	return 0;
 }
@@ -172,7 +173,8 @@ ssh_proxy_fdpass_connect(const char *host, u_short port,
  * Connect to the given ssh server using a proxy command.
  */
 static int
-ssh_proxy_connect(const char *host, u_short port, const char *proxy_command)
+ssh_proxy_connect(struct ssh *ssh, const char *host, u_short port,
+    const char *proxy_command)
 {
 	char *command_string;
 	int pin[2], pout[2];
@@ -239,9 +241,9 @@ ssh_proxy_connect(const char *host, u_short port, const char *proxy_command)
 	free(command_string);
 
 	/* Set the connection file descriptors. */
-	packet_set_connection(pout[0], pin[1]);
+	if (ssh_packet_set_connection(ssh, pout[0], pin[1]) == NULL)
+		return -1; /* ssh_packet_set_connection logs error */
 
-	/* Indicate OK return */
 	return 0;
 }
 
@@ -397,7 +399,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
  * the daemon.
  */
 static int
-ssh_connect_direct(const char *host, struct addrinfo *aitop,
+ssh_connect_direct(struct ssh *ssh, const char *host, struct addrinfo *aitop,
     struct sockaddr_storage *hostaddr, u_short port, int family,
     int connection_attempts, int *timeout_ms, int want_keepalive, int needpriv)
 {
@@ -471,27 +473,31 @@ ssh_connect_direct(const char *host, struct addrinfo *aitop,
 		error("setsockopt SO_KEEPALIVE: %.100s", strerror(errno));
 
 	/* Set the connection. */
-	packet_set_connection(sock, sock);
+	if (ssh_packet_set_connection(ssh, sock, sock) == NULL)
+		return -1; /* ssh_packet_set_connection logs error */
 
-	return 0;
+        return 0;
 }
 
 int
-ssh_connect(const char *host, struct addrinfo *addrs,
+ssh_connect(struct ssh *ssh, const char *host, struct addrinfo *addrs,
     struct sockaddr_storage *hostaddr, u_short port, int family,
     int connection_attempts, int *timeout_ms, int want_keepalive, int needpriv)
 {
 	if (options.proxy_command == NULL) {
-		return ssh_connect_direct(host, addrs, hostaddr, port, family,
-		    connection_attempts, timeout_ms, want_keepalive, needpriv);
+		return ssh_connect_direct(ssh, host, addrs, hostaddr, port,
+		    family, connection_attempts, timeout_ms, want_keepalive,
+		    needpriv);
 	} else if (strcmp(options.proxy_command, "-") == 0) {
-		packet_set_connection(STDIN_FILENO, STDOUT_FILENO);
-		return 0; /* Always succeeds */
+		if ((ssh_packet_set_connection(ssh,
+		    STDIN_FILENO, STDOUT_FILENO)) == NULL)
+			return -1; /* ssh_packet_set_connection logs error */
+		return 0;
 	} else if (options.proxy_use_fdpass) {
-		return ssh_proxy_fdpass_connect(host, port,
+		return ssh_proxy_fdpass_connect(ssh, host, port,
 		    options.proxy_command);
 	}
-	return ssh_proxy_connect(host, port, options.proxy_command);
+	return ssh_proxy_connect(ssh, host, port, options.proxy_command);
 }
 
 static void
@@ -852,7 +858,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		if (readonly || want_cert)
 			goto fail;
 		/* The host is new. */
-		if (options.strict_host_key_checking == 1) {
+		if (options.strict_host_key_checking ==
+		    SSH_STRICT_HOSTKEY_YES) {
 			/*
 			 * User has requested strict host key checking.  We
 			 * will not add the host key automatically.  The only
@@ -861,7 +868,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			error("No %s host key is known for %.200s and you "
 			    "have requested strict checking.", type, host);
 			goto fail;
-		} else if (options.strict_host_key_checking == 2) {
+		} else if (options.strict_host_key_checking ==
+		    SSH_STRICT_HOSTKEY_ASK) {
 			char msg1[1024], msg2[1024];
 
 			if (show_other_keys(host_hostkeys, host_key))
@@ -905,8 +913,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			hostkey_trusted = 1; /* user explicitly confirmed */
 		}
 		/*
-		 * If not in strict mode, add the key automatically to the
-		 * local known_hosts file.
+		 * If in "new" or "off" strict mode, add the key automatically
+		 * to the local known_hosts file.
 		 */
 		if (options.check_host_ip && ip_status == HOST_NEW) {
 			snprintf(hostline, sizeof(hostline), "%s,%s", host, ip);
@@ -948,7 +956,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		 * If strict host key checking is in use, the user will have
 		 * to edit the key manually and we can only abort.
 		 */
-		if (options.strict_host_key_checking) {
+		if (options.strict_host_key_checking !=
+		    SSH_STRICT_HOSTKEY_OFF) {
 			error("%s host key for %.200s was revoked and you have "
 			    "requested strict checking.", type, host);
 			goto fail;
@@ -1001,7 +1010,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		 * If strict host key checking is in use, the user will have
 		 * to edit the key manually and we can only abort.
 		 */
-		if (options.strict_host_key_checking) {
+		if (options.strict_host_key_checking !=
+		    SSH_STRICT_HOSTKEY_OFF) {
 			error("%s host key for %.200s has changed and you have "
 			    "requested strict checking.", type, host);
 			goto fail;
@@ -1088,15 +1098,17 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			    "\nMatching host key in %s:%lu",
 			    host_found->file, host_found->line);
 		}
-		if (options.strict_host_key_checking == 1) {
-			logit("%s", msg);
-			error("Exiting, you have requested strict checking.");
-			goto fail;
-		} else if (options.strict_host_key_checking == 2) {
+		if (options.strict_host_key_checking ==
+		    SSH_STRICT_HOSTKEY_ASK) {
 			strlcat(msg, "\nAre you sure you want "
 			    "to continue connecting (yes/no)? ", sizeof(msg));
 			if (!confirm(msg))
 				goto fail;
+		} else if (options.strict_host_key_checking !=
+		    SSH_STRICT_HOSTKEY_OFF) {
+			logit("%s", msg);
+			error("Exiting, you have requested strict checking.");
+			goto fail;
 		} else {
 			logit("%s", msg);
 		}
