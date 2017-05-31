@@ -62,8 +62,6 @@ D/moduli-gen////
 /hmac.h/1.9/Sat Mar 11 12:24:49 2017//
 /hostfile.h/1.24/Sat Mar 11 12:24:49 2017//
 /kexc25519.c/1.10/Sat Mar 11 12:24:49 2017//
-/kexc25519c.c/1.7/Sat Mar 11 12:24:49 2017//
-/kexc25519s.c/1.10/Sat Mar 11 12:24:49 2017//
 /kexdh.c/1.26/Sat Mar 11 12:24:49 2017//
 /kexecdh.c/1.6/Sat Mar 11 12:24:49 2017//
 /kexgex.c/1.29/Sat Mar 11 12:24:49 2017//
@@ -148,99 +146,46 @@ D/moduli-gen////
 /Makefile.inc/1.54/Sun May 28 17:25:33 2017//
 /PROTOCOL/1.31/Sun May 28 17:25:33 2017//
 /PROTOCOL.agent/1.12/Sun May 28 17:25:33 2017//
-/PROTOCOL.certkeys/1.11/Sun May 28 17:25:33 2017//
 /auth-options.c/1.72/Sun May 28 16:54:42 2017//
-/auth.c/1.121/Result of merge//
-/auth.h/1.91/Result of merge//
-/auth2-chall.c/1.48/Result of merge//
-/auth2-gss.c/1.25/Result of merge//
-/auth2-hostbased.c/1.30/Result of merge//
-/auth2-kbdint.c/1.8/Result of merge//
-/auth2-none.c/1.20/Result of merge//
-/auth2-passwd.c/1.14/Result of merge//
-/auth2-pubkey.c/1.65/Result of merge//
-/auth2.c/1.140/Result of merge//
 /authfd.c/1.103/Sun May 28 17:25:33 2017//
 /authfd.h/1.40/Sun May 28 17:25:33 2017//
-/authfile.c/1.125/Result of merge//
 /bitmap.c/1.5/Sun May 28 17:25:33 2017//
 /bufbn.c/1.13/Sun May 28 17:25:33 2017//
 /buffer.h/1.26/Sun May 28 17:25:33 2017//
-/channels.c/1.363/Result of merge//
-/channels.h/1.126/Result of merge//
-/cipher-3des1.c/1.12/Sun May 28 18:59:53 2017//
-/cipher-bf1.c/1.7/Sun May 28 18:59:53 2017//
 /cipher.c/1.107/Sun May 28 17:25:33 2017//
 /cipher.h/1.52/Sun May 28 17:25:33 2017//
-/clientloop.c/1.297/Result of merge//
 /compat.c/1.103/Sun May 28 17:25:33 2017//
 /compat.h/1.49/Sun May 28 17:25:33 2017//
-/deattack.c/1.32/Sun May 28 18:59:54 2017//
-/deattack.h/1.11/Sun May 28 18:59:54 2017//
 /digest-libc.c/1.6/Sun May 28 17:25:33 2017//
 /digest-openssl.c/1.7/Sun May 28 17:25:33 2017//
 /digest.h/1.8/Sun May 28 17:25:33 2017//
-/dispatch.c/1.30/Result of merge//
-/dispatch.h/1.13/Result of merge//
 /hostfile.c/1.70/Sun May 28 17:25:33 2017//
-/kex.c/1.133/Result of merge//
-/kex.h/1.83/Result of merge//
-/kexdhc.c/1.20/Result of merge//
-/kexdhs.c/1.25/Result of merge//
-/kexecdhc.c/1.11/Result of merge//
-/kexecdhs.c/1.16/Result of merge//
-/kexgexc.c/1.25/Result of merge//
-/kexgexs.c/1.31/Result of merge//
-/key.c/1.131/Result of merge//
-/key.h/1.51/Result of merge//
 /log.c/1.50/Sun May 28 17:25:33 2017//
 /log.h/1.22/Sun May 28 17:25:33 2017//
 /mac.c/1.34/Sun May 28 17:25:33 2017//
 /misc.c/1.109/Sun May 28 17:25:33 2017//
-/monitor.c/1.169/Result of merge//
-/monitor_wrap.c/1.92/Result of merge//
-/monitor_wrap.h/1.34/Result of merge//
 /myproposal.h/1.55/Sun May 28 17:25:33 2017//
 /nchan.c/1.65/Sun May 28 17:25:33 2017//
 /opacket.c/1.6/Sun May 28 17:25:33 2017//
 /opacket.h/1.10/Sun May 28 17:25:33 2017//
 /packet.c/1.256/Sun May 28 17:25:33 2017//
-/packet.h/1.80/Result of merge//
 /pathnames.h/1.27/Sun May 28 17:25:33 2017//
-/readconf.c/1.276/Sun May 28 17:25:33 2017//
-/readconf.h/1.121/Sun May 28 17:25:33 2017//
 /scp.1/1.74/Sun May 28 17:25:33 2017//
 /scp.c/1.191/Sun May 28 17:25:33 2017//
 /servconf.c/1.308/Sun May 28 17:25:33 2017//
-/serverloop.c/1.192/Result of merge//
 /sftp-server.c/1.111/Sun May 28 17:25:33 2017//
 /sftp.1/1.110/Sun May 28 17:25:33 2017//
 /sftp.c/1.179/Sun May 28 17:25:33 2017//
 /ssh-add.1/1.64/Sun May 28 17:25:33 2017//
-/ssh-add.c/1.132/Result of merge//
 /ssh-agent.c/1.221/Sun May 28 17:25:33 2017//
 /ssh-keygen.1/1.141/Sun May 28 17:25:33 2017//
-/ssh-keygen.c/1.304/Result of merge//
 /ssh-keyscan.1/1.40/Sun May 28 17:25:33 2017//
 /ssh-keyscan.c/1.113/Sun May 28 17:25:33 2017//
-/ssh-pkcs11-client.c/1.7/Result of merge//
-/ssh-pkcs11-helper.c/1.13/Result of merge//
-/ssh-pkcs11.c/1.24/Result of merge//
 /ssh-rsa.c/1.61/Sun May 28 17:25:33 2017//
-/ssh.1/1.381/Sun May 28 17:25:33 2017//
-/ssh.c/1.460/Result of merge//
 /ssh.h/1.87/Sun May 28 17:25:33 2017//
-/ssh1.h/1.7/Sun May 28 18:59:56 2017//
 /ssh_api.c/1.8/Sun May 28 17:25:33 2017//
 /ssh_config/1.33/Sun May 28 17:25:33 2017//
-/ssh_config.5/1.248/Sun May 28 17:25:33 2017//
-/sshbuf.c/1.9/Sun May 28 18:59:56 2017//
-/sshconnect.c/1.280/Result of merge//
-/sshconnect.h/1.30/Result of merge//
-/sshconnect1.c/1.80/Sun May 28 18:59:57 2017//
-/sshconnect2.c/1.261/Result of merge//
 /sshd.8/1.289/Sun May 28 17:25:33 2017//
-/sshd.c/1.488/Result of merge//
 /sshd_config/1.101/Sun May 28 17:25:33 2017//
 /sshd_config.5/1.245/Sun May 28 17:25:33 2017//
 /ssherr.c/1.6/Sun May 28 17:25:33 2017//
@@ -251,3 +196,58 @@ D/moduli-gen////
 /ttymodes.h/1.16/Sun May 28 17:25:33 2017//
 /utf8.c/1.6/Sun May 28 17:25:33 2017//
 /version.h/1.79/Sun May 28 17:25:33 2017//
+/PROTOCOL.certkeys/1.12/Mon May 29 00:04:25 2017//
+/auth.c/1.121/Mon May 29 00:04:21 2017//
+/auth.h/1.91/Mon May 29 00:04:21 2017//
+/auth2-chall.c/1.48/Mon May 29 00:04:21 2017//
+/auth2-gss.c/1.25/Mon May 29 00:04:21 2017//
+/auth2-hostbased.c/1.30/Mon May 29 00:04:21 2017//
+/auth2-kbdint.c/1.8/Mon May 29 00:04:21 2017//
+/auth2-none.c/1.20/Mon May 29 00:04:21 2017//
+/auth2-passwd.c/1.14/Mon May 29 00:04:21 2017//
+/auth2-pubkey.c/1.65/Mon May 29 00:04:21 2017//
+/authfile.c/1.125/Mon May 29 00:04:21 2017//
+/channels.c/1.364/Mon May 29 00:04:25 2017//
+/channels.h/1.126/Mon May 29 00:04:21 2017//
+/cipher-3des1.c/1.12/Mon May 29 00:04:25 2017//
+/cipher-bf1.c/1.7/Mon May 29 00:04:25 2017//
+/clientloop.c/1.297/Mon May 29 00:04:21 2017//
+/deattack.c/1.32/Mon May 29 00:04:25 2017//
+/deattack.h/1.11/Mon May 29 00:04:25 2017//
+/dispatch.c/1.30/Mon May 29 00:04:21 2017//
+/dispatch.h/1.13/Mon May 29 00:04:21 2017//
+/kex.c/1.133/Mon May 29 00:04:21 2017//
+/kex.h/1.83/Mon May 29 00:04:21 2017//
+/kexc25519c.c/1.8/Mon May 29 00:04:25 2017//
+/kexc25519s.c/1.11/Mon May 29 00:04:25 2017//
+/kexdhc.c/1.20/Mon May 29 00:04:21 2017//
+/kexdhs.c/1.25/Mon May 29 00:04:21 2017//
+/kexecdhc.c/1.11/Mon May 29 00:04:21 2017//
+/kexecdhs.c/1.16/Mon May 29 00:04:21 2017//
+/kexgexc.c/1.25/Mon May 29 00:04:21 2017//
+/kexgexs.c/1.31/Mon May 29 00:04:21 2017//
+/key.c/1.131/Mon May 29 00:04:21 2017//
+/key.h/1.51/Mon May 29 00:04:21 2017//
+/monitor.c/1.169/Mon May 29 00:04:21 2017//
+/monitor_wrap.c/1.92/Mon May 29 00:04:21 2017//
+/monitor_wrap.h/1.34/Mon May 29 00:04:21 2017//
+/packet.h/1.80/Mon May 29 00:04:21 2017//
+/readconf.c/1.277/Mon May 29 00:04:25 2017//
+/readconf.h/1.122/Mon May 29 00:04:25 2017//
+/serverloop.c/1.192/Mon May 29 00:04:21 2017//
+/ssh-add.c/1.132/Mon May 29 00:04:21 2017//
+/ssh-keygen.c/1.304/Mon May 29 00:04:21 2017//
+/ssh-pkcs11-client.c/1.7/Mon May 29 00:04:21 2017//
+/ssh-pkcs11-helper.c/1.13/Mon May 29 00:04:21 2017//
+/ssh-pkcs11.c/1.24/Mon May 29 00:04:21 2017//
+/ssh.1/1.382/Mon May 29 00:04:25 2017//
+/ssh.c/1.461/Mon May 29 00:04:25 2017//
+/ssh1.h/1.7/Mon May 29 00:04:25 2017//
+/ssh_config.5/1.250/Mon May 29 00:04:25 2017//
+/sshbuf.c/1.9/Mon May 29 00:04:21 2017//
+/sshconnect.c/1.280/Mon May 29 00:04:21 2017//
+/sshconnect.h/1.30/Mon May 29 00:04:21 2017//
+/sshconnect1.c/1.80/Mon May 29 00:04:25 2017//
+/sshconnect2.c/1.262/Mon May 29 00:04:25 2017//
+/sshd.c/1.488/Mon May 29 00:04:21 2017//
+/auth2.c/1.141/Mon May 29 00:19:10 2017//
