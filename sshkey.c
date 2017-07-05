@@ -1,4 +1,4 @@
-/* $OpenBSD: sshkey.c,v 1.52 2017/06/09 06:40:24 djm Exp $ */
+/* $OpenBSD: sshkey.c,v 1.54 2017/07/01 13:50:45 djm Exp $ */
 /*
  * Copyright (c) 2000, 2001 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Alexander von Gernler.  All rights reserved.
@@ -47,7 +47,6 @@
 #include "ssherr.h"
 #include "misc.h"
 #include "sshbuf.h"
-#include "rsa.h"
 #include "cipher.h"
 #include "digest.h"
 #define SSHKEY_INTERNAL
@@ -2209,7 +2208,8 @@ sshkey_drop_cert(struct sshkey *k)
 
 /* Sign a certified key, (re-)generating the signed certblob. */
 int
-sshkey_certify(struct sshkey *k, struct sshkey *ca, const char *alg)
+sshkey_certify_custom(struct sshkey *k, struct sshkey *ca, const char *alg,
+    sshkey_certify_signer *signer, void *signer_ctx)
 {
 	struct sshbuf *principals = NULL;
 	u_char *ca_blob = NULL, *sig_blob = NULL, nonce[32];
@@ -2296,8 +2296,8 @@ sshkey_certify(struct sshkey *k, struct sshkey *ca, const char *alg)
 		goto out;
 
 	/* Sign the whole mess */
-	if ((ret = sshkey_sign(ca, &sig_blob, &sig_len, sshbuf_ptr(cert),
-	    sshbuf_len(cert), alg, 0)) != 0)
+	if ((ret = signer(ca, &sig_blob, &sig_len, sshbuf_ptr(cert),
+	    sshbuf_len(cert), alg, 0, signer_ctx)) != 0)
 		goto out;
 
 	/* Append signature and we are done */
@@ -2311,6 +2311,22 @@ sshkey_certify(struct sshkey *k, struct sshkey *ca, const char *alg)
 	free(ca_blob);
 	sshbuf_free(principals);
 	return ret;
+}
+
+static int
+default_key_sign(const struct sshkey *key, u_char **sigp, size_t *lenp,
+    const u_char *data, size_t datalen,
+    const char *alg, u_int compat, void *ctx)
+{
+	if (ctx != NULL)
+		return SSH_ERR_INVALID_ARGUMENT;
+	return sshkey_sign(key, sigp, lenp, data, datalen, alg, compat);
+}
+
+int
+sshkey_certify(struct sshkey *k, struct sshkey *ca, const char *alg)
+{
+	return sshkey_certify_custom(k, ca, alg, default_key_sign, NULL);
 }
 
 int
@@ -2600,7 +2616,7 @@ sshkey_private_deserialize(struct sshbuf *buf, struct sshkey **kp)
 		    (r = sshbuf_get_bignum2(buf, k->rsa->iqmp)) != 0 ||
 		    (r = sshbuf_get_bignum2(buf, k->rsa->p)) != 0 ||
 		    (r = sshbuf_get_bignum2(buf, k->rsa->q)) != 0 ||
-		    (r = rsa_generate_additional_parameters(k->rsa)) != 0)
+		    (r = ssh_rsa_generate_additional_parameters(k)) != 0)
 			goto out;
 		if (BN_num_bits(k->rsa->n) < SSH_RSA_MINIMUM_MODULUS_SIZE) {
 			r = SSH_ERR_KEY_LENGTH;
@@ -2614,7 +2630,7 @@ sshkey_private_deserialize(struct sshbuf *buf, struct sshkey **kp)
 		    (r = sshbuf_get_bignum2(buf, k->rsa->iqmp)) != 0 ||
 		    (r = sshbuf_get_bignum2(buf, k->rsa->p)) != 0 ||
 		    (r = sshbuf_get_bignum2(buf, k->rsa->q)) != 0 ||
-		    (r = rsa_generate_additional_parameters(k->rsa)) != 0)
+		    (r = ssh_rsa_generate_additional_parameters(k)) != 0)
 			goto out;
 		if (BN_num_bits(k->rsa->n) < SSH_RSA_MINIMUM_MODULUS_SIZE) {
 			r = SSH_ERR_KEY_LENGTH;
