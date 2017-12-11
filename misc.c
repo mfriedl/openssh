@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.c,v 1.115 2017/10/23 05:08:00 djm Exp $ */
+/* $OpenBSD: misc.c,v 1.122 2017/12/08 02:14:33 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2005,2006 Damien Miller.  All rights reserved.
@@ -153,6 +153,60 @@ set_nodelay(int fd)
 	debug2("fd %d setting TCP_NODELAY", fd);
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof opt) == -1)
 		error("setsockopt TCP_NODELAY: %.100s", strerror(errno));
+}
+
+/* Allow local port reuse in TIME_WAIT */
+int
+set_reuseaddr(int fd)
+{
+	int on = 1;
+
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
+		error("setsockopt SO_REUSEADDR fd %d: %s", fd, strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+/* Get/set routing domain */
+char *
+get_rdomain(int fd)
+{
+	int rtable;
+	char *ret;
+	socklen_t len = sizeof(rtable);
+
+	if (getsockopt(fd, SOL_SOCKET, SO_RTABLE, &rtable, &len) == -1) {
+		error("Failed to get routing domain for fd %d: %s",
+		    fd, strerror(errno));
+		return NULL;
+	}
+	xasprintf(&ret, "%d", rtable);
+	return ret;
+}
+
+int
+set_rdomain(int fd, const char *name)
+{
+	int rtable;
+	const char *errstr;
+
+	if (name == NULL)
+		return 0; /* default table */
+
+	rtable = (int)strtonum(name, 0, 255, &errstr);
+	if (errstr != NULL) {
+		/* Shouldn't happen */
+		error("Invalid routing domain \"%s\": %s", name, errstr);
+		return -1;
+	}
+	if (setsockopt(fd, SOL_SOCKET, SO_RTABLE,
+	    &rtable, sizeof(rtable)) == -1) {
+		error("Failed to set routing domain %d on fd %d: %s",
+		    rtable, fd, strerror(errno));
+		return -1;
+	}
+	return 0;
 }
 
 /* Characters considered whitespace in strsep calls. */
@@ -478,7 +532,7 @@ parse_user_host_path(const char *s, char **userp, char **hostp, char **pathp)
 	if (pathp != NULL)
 		*pathp = NULL;
 
-	sdup = tmp = xstrdup(s);
+	sdup = xstrdup(s);
 
 	/* Check for remote syntax: [user@]host:[path] */
 	if ((tmp = colon(sdup)) == NULL)
@@ -510,11 +564,11 @@ parse_user_host_path(const char *s, char **userp, char **hostp, char **pathp)
 	if (hostp != NULL) {
 		*hostp = host;
 		host = NULL;
-        }
+	}
 	if (pathp != NULL) {
 		*pathp = path;
 		path = NULL;
-        }
+	}
 	ret = 0;
 out:
 	free(sdup);
@@ -1165,8 +1219,8 @@ ms_subtract_diff(struct timeval *start, int *ms)
 {
 	struct timeval diff, finish;
 
-	gettimeofday(&finish, NULL);
-	timersub(&finish, start, &diff);	
+	monotime_tv(&finish);
+	timersub(&finish, start, &diff);
 	*ms -= (diff.tv_sec * 1000) + (diff.tv_usec / 1000);
 }
 
@@ -1179,14 +1233,29 @@ ms_to_timeval(struct timeval *tv, int ms)
 	tv->tv_usec = (ms % 1000) * 1000;
 }
 
+void
+monotime_ts(struct timespec *ts)
+{
+	if (clock_gettime(CLOCK_MONOTONIC, ts) != 0)
+		fatal("clock_gettime: %s", strerror(errno));
+}
+
+void
+monotime_tv(struct timeval *tv)
+{
+	struct timespec ts;
+
+	monotime_ts(&ts);
+	tv->tv_sec = ts.tv_sec;
+	tv->tv_usec = ts.tv_nsec / 1000;
+}
+
 time_t
 monotime(void)
 {
 	struct timespec ts;
 
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-		fatal("clock_gettime: %s", strerror(errno));
-
+	monotime_ts(&ts);
 	return (ts.tv_sec);
 }
 
@@ -1195,10 +1264,8 @@ monotime_double(void)
 {
 	struct timespec ts;
 
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-		fatal("clock_gettime: %s", strerror(errno));
-
-	return (ts.tv_sec + (double)ts.tv_nsec / 1000000000);
+	monotime_ts(&ts);
+	return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
 }
 
 void
@@ -1220,7 +1287,7 @@ bandwidth_limit(struct bwlimit *bw, size_t read_len)
 	struct timespec ts, rm;
 
 	if (!timerisset(&bw->bwstart)) {
-		gettimeofday(&bw->bwstart, NULL);
+		monotime_tv(&bw->bwstart);
 		return;
 	}
 
@@ -1228,7 +1295,7 @@ bandwidth_limit(struct bwlimit *bw, size_t read_len)
 	if (bw->lamt < bw->thresh)
 		return;
 
-	gettimeofday(&bw->bwend, NULL);
+	monotime_tv(&bw->bwend);
 	timersub(&bw->bwend, &bw->bwstart, &bw->bwend);
 	if (!timerisset(&bw->bwend))
 		return;
@@ -1262,7 +1329,7 @@ bandwidth_limit(struct bwlimit *bw, size_t read_len)
 	}
 
 	bw->lamt = 0;
-	gettimeofday(&bw->bwstart, NULL);
+	monotime_tv(&bw->bwstart);
 }
 
 /* Make a template filename for mk[sd]temp() */
@@ -1363,9 +1430,10 @@ unix_listener(const char *path, int backlog, int unlink_first)
 
 	memset(&sunaddr, 0, sizeof(sunaddr));
 	sunaddr.sun_family = AF_UNIX;
-	if (strlcpy(sunaddr.sun_path, path, sizeof(sunaddr.sun_path)) >= sizeof(sunaddr.sun_path)) {
-		error("%s: \"%s\" too long for Unix domain socket", __func__,
-		    path);
+	if (strlcpy(sunaddr.sun_path, path,
+	    sizeof(sunaddr.sun_path)) >= sizeof(sunaddr.sun_path)) {
+		error("%s: path \"%s\" too long for Unix domain socket",
+		    __func__, path);
 		errno = ENAMETOOLONG;
 		return -1;
 	}
@@ -1373,7 +1441,7 @@ unix_listener(const char *path, int backlog, int unlink_first)
 	sock = socket(PF_UNIX, SOCK_STREAM, 0);
 	if (sock < 0) {
 		saved_errno = errno;
-		error("socket: %.100s", strerror(errno));
+		error("%s: socket: %.100s", __func__, strerror(errno));
 		errno = saved_errno;
 		return -1;
 	}
@@ -1383,18 +1451,18 @@ unix_listener(const char *path, int backlog, int unlink_first)
 	}
 	if (bind(sock, (struct sockaddr *)&sunaddr, sizeof(sunaddr)) < 0) {
 		saved_errno = errno;
-		error("bind: %.100s", strerror(errno));
+		error("%s: cannot bind to path %s: %s",
+		    __func__, path, strerror(errno));
 		close(sock);
-		error("%s: cannot bind to path: %s", __func__, path);
 		errno = saved_errno;
 		return -1;
 	}
 	if (listen(sock, backlog) < 0) {
 		saved_errno = errno;
-		error("listen: %.100s", strerror(errno));
+		error("%s: cannot listen on path %s: %s",
+		    __func__, path, strerror(errno));
 		close(sock);
 		unlink(path);
-		error("%s: cannot listen on path: %s", __func__, path);
 		errno = saved_errno;
 		return -1;
 	}
@@ -1958,4 +2026,18 @@ bad:
 	if (errstr != NULL)
 		*errstr = errbuf;
 	return 0;
+}
+
+const char *
+atoi_err(const char *nptr, int *val)
+{
+	const char *errstr = NULL;
+	long long num;
+
+	if (nptr == NULL || *nptr == '\0')
+		return "missing";
+	num = strtonum(nptr, 0, INT_MAX, &errstr);
+	if (errstr == NULL)
+		*val = (int)num;
+	return errstr;
 }

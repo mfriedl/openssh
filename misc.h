@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.h,v 1.65 2017/10/23 05:08:00 djm Exp $ */
+/* $OpenBSD: misc.h,v 1.69 2017/12/05 23:59:47 dtucker Exp $ */
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -48,6 +48,9 @@ char	*strdelim(char **);
 int	 set_nonblock(int);
 int	 unset_nonblock(int);
 void	 set_nodelay(int);
+int	 set_reuseaddr(int);
+char	*get_rdomain(int);
+int	 set_rdomain(int, const char *);
 int	 a2port(const char *);
 int	 a2tun(const char *, int *);
 char	*put_host_port(const char *, u_short);
@@ -64,11 +67,14 @@ char	*tohex(const void *, size_t);
 void	 sanitise_stdfd(void);
 void	 ms_subtract_diff(struct timeval *, int *);
 void	 ms_to_timeval(struct timeval *, int);
+void	 monotime_ts(struct timespec *);
+void	 monotime_tv(struct timeval *);
 time_t	 monotime(void);
 double	 monotime_double(void);
 void	 lowercase(char *s);
 int	 unix_listener(const char *, int, int);
 int	 valid_domain(char *, int, const char **);
+const char *atoi_err(const char *, int *);
 
 struct passwd *pwcopy(struct passwd *);
 const char *ssh_gai_strerror(int);
