@@ -65,7 +65,6 @@
 #include "atomicio.h"
 #include "monitor_fdpass.h"
 #include "misc.h"
-#include "uuencode.h"
 
 #include "channels.h"
 #include "session.h"
