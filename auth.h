@@ -195,4 +195,10 @@ void	 auth_debug_reset(void);
 
 struct passwd *fakepw(void);
 
+#define	SSH_SUBPROCESS_STDOUT_DISCARD  (1)     /* Discard stdout */
+#define	SSH_SUBPROCESS_STDOUT_CAPTURE  (1<<1)  /* Redirect stdout */
+#define	SSH_SUBPROCESS_STDERR_DISCARD  (1<<2)  /* Discard stderr */
+pid_t	subprocess(const char *, struct passwd *,
+    const char *, int, char **, FILE **, u_int flags);
+
 #endif

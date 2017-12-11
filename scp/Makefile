@@ -4,7 +4,7 @@
 
 SRCS=	scp.c
 SRCS+=	atomicio.c cleanup.c fatal.c log.c misc.c progressmeter.c \
-	sshbuf-getput-basic.c sshbuf.c ssherr.c uidswap.c utf8.c xmalloc.c
+	sshbuf-getput-basic.c sshbuf.c ssherr.c utf8.c xmalloc.c
 
 PROG=	scp
 BINOWN=	root
