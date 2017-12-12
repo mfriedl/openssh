@@ -3,8 +3,8 @@
 .PATH:		${.CURDIR}/..
 
 SRCS=	sftp-server.c sftp-common.c sftp-server-main.c
-SRCS+=	addrmatch.c fatal.c log.c match.c misc.c sshbuf-getput-basic.c \
-	sshbuf.c ssherr.c uidswap.c xmalloc.c
+SRCS+=	fatal.c
+SRCS+=	${SRCS_BASE} ${SRCS_UTL}
 
 PROG=	sftp-server
 BINOWN=	root
