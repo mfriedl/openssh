@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.286 2018/04/06 13:02:39 djm Exp $ */
+/* $OpenBSD: readconf.c,v 1.288 2018/06/01 03:33:53 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -536,6 +536,7 @@ match_cfg_line(Options *options, char **condition, struct passwd *pw,
 	const char *ruser;
 	int r, port, this_result, result = 1, attributes = 0, negate;
 	char thishost[NI_MAXHOST], shorthost[NI_MAXHOST], portstr[NI_MAXSERV];
+	char uidstr[32];
 
 	/*
 	 * Configuration is likely to be incomplete at this point so we
@@ -616,6 +617,8 @@ match_cfg_line(Options *options, char **condition, struct passwd *pw,
 			strlcpy(shorthost, thishost, sizeof(shorthost));
 			shorthost[strcspn(thishost, ".")] = '\0';
 			snprintf(portstr, sizeof(portstr), "%d", port);
+			snprintf(uidstr, sizeof(uidstr), "%llu",
+			    (unsigned long long)pw->pw_uid);
 
 			cmd = percent_expand(arg,
 			    "L", shorthost,
@@ -626,6 +629,7 @@ match_cfg_line(Options *options, char **condition, struct passwd *pw,
 			    "p", portstr,
 			    "r", ruser,
 			    "u", pw->pw_name,
+			    "i", uidstr,
 			    (char *)NULL);
 			if (result != 1) {
 				/* skip execution if prior predicate failed */
@@ -2055,6 +2059,12 @@ fill_default_options(Options * options)
 	CLEAR_ON_NONE(options->proxy_command);
 	CLEAR_ON_NONE(options->control_path);
 	CLEAR_ON_NONE(options->revoked_host_keys);
+	if (options->jump_host != NULL &&
+	    strcmp(options->jump_host, "none") == 0 &&
+	    options->jump_port == 0 && options->jump_user == NULL) {
+		free(options->jump_host);
+		options->jump_host = NULL;
+	}
 	/* options->identity_agent distinguishes NULL from 'none' */
 	/* options->user will be set in the main program if appropriate */
 	/* options->hostname will be set in the main program if appropriate */
@@ -2283,6 +2293,8 @@ parse_jump(const char *s, Options *o, int active)
 	orig = sdup = xstrdup(s);
 	first = active;
 	do {
+		if (strcasecmp(s, "none") == 0)
+			break;
 		if ((cp = strrchr(sdup, ',')) == NULL)
 			cp = sdup; /* last */
 		else
@@ -2303,14 +2315,19 @@ parse_jump(const char *s, Options *o, int active)
 	} while (cp != sdup);
 	/* success */
 	if (active) {
-		o->jump_user = user;
-		o->jump_host = host;
-		o->jump_port = port;
-		o->proxy_command = xstrdup("none");
-		user = host = NULL;
-		if ((cp = strrchr(s, ',')) != NULL && cp != s) {
-			o->jump_extra = xstrdup(s);
-			o->jump_extra[cp - s] = '\0';
+		if (strcasecmp(s, "none") == 0) {
+			o->jump_host = xstrdup("none");
+			o->jump_port = 0;
+		} else {
+			o->jump_user = user;
+			o->jump_host = host;
+			o->jump_port = port;
+			o->proxy_command = xstrdup("none");
+			user = host = NULL;
+			if ((cp = strrchr(s, ',')) != NULL && cp != s) {
+				o->jump_extra = xstrdup(s);
+				o->jump_extra[cp - s] = '\0';
+			}
 		}
 	}
 	ret = 0;
