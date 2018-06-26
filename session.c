@@ -1,4 +1,4 @@
-/* $OpenBSD: session.c,v 1.295 2018/06/01 03:33:53 djm Exp $ */
+/* $OpenBSD: session.c,v 1.300 2018/06/09 03:03:10 djm Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
@@ -272,26 +272,43 @@ prepare_auth_info_file(struct passwd *pw, struct sshbuf *info)
 }
 
 static void
-set_permitopen_from_authopts(struct ssh *ssh, const struct sshauthopt *opts)
+set_fwdpermit_from_authopts(struct ssh *ssh, const struct sshauthopt *opts)
 {
 	char *tmp, *cp, *host;
 	int port;
 	size_t i;
 
-	if ((options.allow_tcp_forwarding & FORWARD_LOCAL) == 0)
-		return;
-	channel_clear_permitted_opens(ssh);
-	for (i = 0; i < auth_opts->npermitopen; i++) {
-		tmp = cp = xstrdup(auth_opts->permitopen[i]);
-		/* This shouldn't fail as it has already been checked */
-		if ((host = hpdelim(&cp)) == NULL)
-			fatal("%s: internal error: hpdelim", __func__);
-		host = cleanhostname(host);
-		if (cp == NULL || (port = permitopen_port(cp)) < 0)
-			fatal("%s: internal error: permitopen port",
-			    __func__);
-		channel_add_permitted_opens(ssh, host, port);
-		free(tmp);
+	if ((options.allow_tcp_forwarding & FORWARD_LOCAL) != 0) {
+		channel_clear_permission(ssh, FORWARD_USER, FORWARD_LOCAL);
+		for (i = 0; i < auth_opts->npermitopen; i++) {
+			tmp = cp = xstrdup(auth_opts->permitopen[i]);
+			/* This shouldn't fail as it has already been checked */
+			if ((host = hpdelim(&cp)) == NULL)
+				fatal("%s: internal error: hpdelim", __func__);
+			host = cleanhostname(host);
+			if (cp == NULL || (port = permitopen_port(cp)) < 0)
+				fatal("%s: internal error: permitopen port",
+				    __func__);
+			channel_add_permission(ssh,
+			    FORWARD_USER, FORWARD_LOCAL, host, port);
+			free(tmp);
+		}
+	}
+	if ((options.allow_tcp_forwarding & FORWARD_REMOTE) != 0) {
+		channel_clear_permission(ssh, FORWARD_USER, FORWARD_REMOTE);
+		for (i = 0; i < auth_opts->npermitlisten; i++) {
+			tmp = cp = xstrdup(auth_opts->permitlisten[i]);
+			/* This shouldn't fail as it has already been checked */
+			if ((host = hpdelim(&cp)) == NULL)
+				fatal("%s: internal error: hpdelim", __func__);
+			host = cleanhostname(host);
+			if (cp == NULL || (port = permitopen_port(cp)) < 0)
+				fatal("%s: internal error: permitlisten port",
+				    __func__);
+			channel_add_permission(ssh,
+			    FORWARD_USER, FORWARD_REMOTE, host, port);
+			free(tmp);
+		}
 	}
 }
 
@@ -304,14 +321,22 @@ do_authenticated(struct ssh *ssh, Authctxt *authctxt)
 
 	/* setup the channel layer */
 	/* XXX - streamlocal? */
-	set_permitopen_from_authopts(ssh, auth_opts);
-	if (!auth_opts->permit_port_forwarding_flag ||
-	    options.disable_forwarding ||
-	    (options.allow_tcp_forwarding & FORWARD_LOCAL) == 0)
-		channel_disable_adm_local_opens(ssh);
-	else
-		channel_permit_all_opens(ssh);
+	set_fwdpermit_from_authopts(ssh, auth_opts);
 
+	if (!auth_opts->permit_port_forwarding_flag ||
+	    options.disable_forwarding) {
+		channel_disable_admin(ssh, FORWARD_LOCAL);
+		channel_disable_admin(ssh, FORWARD_REMOTE);
+	} else {
+		if ((options.allow_tcp_forwarding & FORWARD_LOCAL) == 0)
+			channel_disable_admin(ssh, FORWARD_LOCAL);
+		else
+			channel_permit_all(ssh, FORWARD_LOCAL);
+		if ((options.allow_tcp_forwarding & FORWARD_REMOTE) == 0)
+			channel_disable_admin(ssh, FORWARD_REMOTE);
+		else
+			channel_permit_all(ssh, FORWARD_REMOTE);
+	}
 	auth_debug_send();
 
 	prepare_auth_info_file(authctxt->pw, authctxt->session_info);
@@ -759,18 +784,18 @@ read_environment_file(char ***env, u_int *envsize,
 	const char *filename)
 {
 	FILE *f;
-	char buf[4096];
-	char *cp, *value;
+	char *line = NULL, *cp, *value;
+	size_t linesize = 0;
 	u_int lineno = 0;
 
 	f = fopen(filename, "r");
 	if (!f)
 		return;
 
-	while (fgets(buf, sizeof(buf), f)) {
+	while (getline(&line, &linesize, f) != -1) {
 		if (++lineno > 1000)
 			fatal("Too many lines in environment file %s", filename);
-		for (cp = buf; *cp == ' ' || *cp == '\t'; cp++)
+		for (cp = line; *cp == ' ' || *cp == '\t'; cp++)
 			;
 		if (!*cp || *cp == '#' || *cp == '\n')
 			continue;
@@ -791,6 +816,7 @@ read_environment_file(char ***env, u_int *envsize,
 		value++;
 		child_set_env(env, envsize, cp, value);
 	}
+	free(line);
 	fclose(f);
 }
 
@@ -800,7 +826,7 @@ do_setup_env(struct ssh *ssh, Session *s, const char *shell)
 	char buf[256];
 	size_t n;
 	u_int i, envsize;
-	char *ocp, *cp, **env, *laddr;
+	char *ocp, *cp, *value, **env, *laddr;
 	struct passwd *pw = s->pw;
 
 	/* Initialize the environment. */
@@ -835,6 +861,19 @@ do_setup_env(struct ssh *ssh, Session *s, const char *shell)
 
 	if (getenv("TZ"))
 		child_set_env(&env, &envsize, "TZ", getenv("TZ"));
+	if (s->term)
+		child_set_env(&env, &envsize, "TERM", s->term);
+	if (s->display)
+		child_set_env(&env, &envsize, "DISPLAY", s->display);
+#ifdef KRB5
+	if (s->authctxt->krb5_ticket_file)
+		child_set_env(&env, &envsize, "KRB5CCNAME",
+		    s->authctxt->krb5_ticket_file);
+#endif
+	if (auth_sock_name != NULL)
+		child_set_env(&env, &envsize, SSH_AUTHSOCKET_ENV_NAME,
+		    auth_sock_name);
+
 
 	/* Set custom environment options from pubkey authentication. */
 	if (options.permit_user_env) {
@@ -847,6 +886,24 @@ do_setup_env(struct ssh *ssh, Session *s, const char *shell)
 			}
 			free(ocp);
 		}
+	}
+
+	/* read $HOME/.ssh/environment. */
+	if (options.permit_user_env) {
+		snprintf(buf, sizeof buf, "%.200s/.ssh/environment",
+		    pw->pw_dir);
+		read_environment_file(&env, &envsize, buf);
+	}
+
+	/* Environment specified by admin */
+	for (i = 0; i < options.num_setenv; i++) {
+		cp = xstrdup(options.setenv[i]);
+		if ((value = strchr(cp, '=')) == NULL) {
+			/* shouldn't happen; vars are checked in servconf.c */
+			fatal("Invalid config SetEnv: %s", options.setenv[i]);
+		}
+		*value++ = '\0';
+		child_set_env(&env, &envsize, cp, value);
 	}
 
 	/* SSH_CLIENT deprecated */
@@ -868,28 +925,10 @@ do_setup_env(struct ssh *ssh, Session *s, const char *shell)
 		child_set_env(&env, &envsize, "SSH_USER_AUTH", auth_info_file);
 	if (s->ttyfd != -1)
 		child_set_env(&env, &envsize, "SSH_TTY", s->tty);
-	if (s->term)
-		child_set_env(&env, &envsize, "TERM", s->term);
-	if (s->display)
-		child_set_env(&env, &envsize, "DISPLAY", s->display);
 	if (original_command)
 		child_set_env(&env, &envsize, "SSH_ORIGINAL_COMMAND",
 		    original_command);
-#ifdef KRB5
-	if (s->authctxt->krb5_ticket_file)
-		child_set_env(&env, &envsize, "KRB5CCNAME",
-		    s->authctxt->krb5_ticket_file);
-#endif
-	if (auth_sock_name != NULL)
-		child_set_env(&env, &envsize, SSH_AUTHSOCKET_ENV_NAME,
-		    auth_sock_name);
 
-	/* read $HOME/.ssh/environment. */
-	if (options.permit_user_env) {
-		snprintf(buf, sizeof buf, "%.200s/.ssh/environment",
-		    pw->pw_dir);
-		read_environment_file(&env, &envsize, buf);
-	}
 	if (debug_flag) {
 		/* dump the environment */
 		fprintf(stderr, "Environment:\n");
