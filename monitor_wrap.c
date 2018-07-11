@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor_wrap.c,v 1.103 2018/07/09 21:53:45 markus Exp $ */
+/* $OpenBSD: monitor_wrap.c,v 1.105 2018/07/10 09:36:58 sf Exp $ */
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * Copyright 2002 Markus Friedl <markus@openbsd.org>
@@ -73,8 +73,6 @@
 #include "ssherr.h"
 
 /* Imports */
-extern z_stream incoming_stream;
-extern z_stream outgoing_stream;
 extern struct monitor *pmonitor;
 extern struct sshbuf *loginmsg;
 extern ServerOptions options;
@@ -746,7 +744,7 @@ mm_ssh_gssapi_accept_ctx(Gssctxt *ctx, gss_buffer_desc *in,
 	mm_request_receive_expect(pmonitor->m_recvfd, MONITOR_ANS_GSSSTEP, m);
 
 	if ((r = sshbuf_get_u32(m, &major)) != 0 ||
-	    (r = sshbuf_get_string(m, &out->value, &out->length)) != 0)
+	    (r = ssh_gssapi_get_buffer_desc(m, out)) != 0)
 		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 	if (flagsp != NULL) {
 		if ((r = sshbuf_get_u32(m, &flags)) != 0)
