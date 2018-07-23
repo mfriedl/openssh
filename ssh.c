@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh.c,v 1.483 2018/07/11 18:53:29 markus Exp $ */
+/* $OpenBSD: ssh.c,v 1.488 2018/07/19 10:28:47 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -94,7 +94,6 @@
 #include "sshpty.h"
 #include "match.h"
 #include "msg.h"
-#include "uidswap.h"
 #include "version.h"
 #include "ssherr.h"
 #include "myproposal.h"
@@ -599,22 +598,11 @@ main(int ac, char **av)
 	original_real_uid = getuid();
 	original_effective_uid = geteuid();
 
-	/*
-	 * Use uid-swapping to give up root privileges for the duration of
-	 * option processing.  We will re-instantiate the rights when we are
-	 * ready to create the privileged port, and will permanently drop
-	 * them when the port has been created (actually, when the connection
-	 * has been made, as we may need to create the port several times).
-	 */
-	PRIV_END;
+	if (getuid() != geteuid())
+		fatal("ssh setuid not supported.");
+	if (getgid() != getegid())
+		fatal("ssh setgid not supported.");
 
-	/* If we are installed setuid root be careful to not drop core. */
-	if (original_real_uid != original_effective_uid) {
-		struct rlimit rlim;
-		rlim.rlim_cur = rlim.rlim_max = 0;
-		if (setrlimit(RLIMIT_CORE, &rlim) < 0)
-			fatal("setrlimit failed: %.100s", strerror(errno));
-	}
 	/* Get user data. */
 	pw = getpwuid(original_real_uid);
 	if (!pw) {
@@ -721,7 +709,6 @@ main(int ac, char **av)
 				fatal("Invalid multiplex command.");
 			break;
 		case 'P':	/* deprecated */
-			options.use_privileged_port = 0;
 			break;
 		case 'Q':
 			cp = NULL;
@@ -1225,9 +1212,6 @@ main(int ac, char **av)
 	if (options.connection_attempts <= 0)
 		fatal("Invalid number of ConnectionAttempts");
 
-	if (original_effective_uid != 0)
-		options.use_privileged_port = 0;
-
 	if (sshbuf_len(command) != 0 && options.remote_command != NULL)
 		fatal("Cannot execute command-line and remote command.");
 
@@ -1361,8 +1345,7 @@ main(int ac, char **av)
 	/* Open a connection to the remote host. */
 	if (ssh_connect(ssh, host, addrs, &hostaddr, options.port,
 	    options.address_family, options.connection_attempts,
-	    &timeout_ms, options.tcp_keep_alive,
-	    options.use_privileged_port) != 0)
+	    &timeout_ms, options.tcp_keep_alive) != 0)
 		exit(255);
 
 	if (addrs != NULL)
@@ -1377,84 +1360,45 @@ main(int ac, char **av)
 		debug3("timeout: %d ms remain after connect", timeout_ms);
 
 	/*
-	 * If we successfully made the connection, load the host private key
-	 * in case we will need it later for hostbased
-	 * authentication. This must be done before releasing extra
-	 * privileges, because the file is only readable by root.
-	 * If we cannot access the private keys, load the public keys
-	 * instead and try to execute the ssh-keysign helper instead.
+	 * If we successfully made the connection and we have hostbased auth
+	 * enabled, load the public keys so we can later use the ssh-keysign
+	 * helper to sign challenges.
 	 */
 	sensitive_data.nkeys = 0;
 	sensitive_data.keys = NULL;
-	sensitive_data.external_keysign = 0;
 	if (options.hostbased_authentication) {
-		sensitive_data.nkeys = 11;
+		sensitive_data.nkeys = 10;
 		sensitive_data.keys = xcalloc(sensitive_data.nkeys,
 		    sizeof(struct sshkey));
 
 		/* XXX check errors? */
-#define L_KEY(t,p,o) \
-	check_load(sshkey_load_private_type(t, p, "", \
-	    &(sensitive_data.keys[o]), NULL, NULL), p, "key")
-#define L_KEYCERT(t,p,o) \
-	check_load(sshkey_load_private_cert(t, p, "", \
-	    &(sensitive_data.keys[o]), NULL), p, "cert and key")
-#define L_PUBKEY(p,o) \
+#define L_PUBKEY(p,o) do { \
+	if ((o) >= sensitive_data.nkeys) \
+		fatal("%s pubkey out of array bounds", __func__); \
 	check_load(sshkey_load_public(p, &(sensitive_data.keys[o]), NULL), \
-	    p, "pubkey")
-#define L_CERT(p,o) \
-	check_load(sshkey_load_cert(p, &(sensitive_data.keys[o])), p, "cert")
+	    p, "pubkey"); \
+} while (0)
+#define L_CERT(p,o) do { \
+	if ((o) >= sensitive_data.nkeys) \
+		fatal("%s cert out of array bounds", __func__); \
+	check_load(sshkey_load_cert(p, &(sensitive_data.keys[o])), p, "cert"); \
+} while (0)
 
-		PRIV_START;
-		L_KEYCERT(KEY_ECDSA, _PATH_HOST_ECDSA_KEY_FILE, 1);
-		L_KEYCERT(KEY_ED25519, _PATH_HOST_ED25519_KEY_FILE, 2);
-		L_KEYCERT(KEY_RSA, _PATH_HOST_RSA_KEY_FILE, 3);
-		L_KEYCERT(KEY_DSA, _PATH_HOST_DSA_KEY_FILE, 4);
-		L_KEY(KEY_ECDSA, _PATH_HOST_ECDSA_KEY_FILE, 5);
-		L_KEY(KEY_ED25519, _PATH_HOST_ED25519_KEY_FILE, 6);
-		L_KEY(KEY_RSA, _PATH_HOST_RSA_KEY_FILE, 7);
-		L_KEY(KEY_DSA, _PATH_HOST_DSA_KEY_FILE, 8);
-		L_KEYCERT(KEY_XMSS, _PATH_HOST_XMSS_KEY_FILE, 9);
-		L_KEY(KEY_XMSS, _PATH_HOST_XMSS_KEY_FILE, 10);
-		PRIV_END;
-
-		if (options.hostbased_authentication == 1 &&
-		    sensitive_data.keys[0] == NULL &&
-		    sensitive_data.keys[5] == NULL &&
-		    sensitive_data.keys[6] == NULL &&
-		    sensitive_data.keys[7] == NULL &&
-		    sensitive_data.keys[8] == NULL &&
-		    sensitive_data.keys[9] == NULL &&
-		    sensitive_data.keys[10] == NULL) {
-			L_CERT(_PATH_HOST_ECDSA_KEY_FILE, 1);
-			L_CERT(_PATH_HOST_ED25519_KEY_FILE, 2);
-			L_CERT(_PATH_HOST_RSA_KEY_FILE, 3);
-			L_CERT(_PATH_HOST_DSA_KEY_FILE, 4);
-			L_PUBKEY(_PATH_HOST_ECDSA_KEY_FILE, 5);
-			L_PUBKEY(_PATH_HOST_ED25519_KEY_FILE, 6);
-			L_PUBKEY(_PATH_HOST_RSA_KEY_FILE, 7);
-			L_PUBKEY(_PATH_HOST_DSA_KEY_FILE, 8);
-			L_CERT(_PATH_HOST_XMSS_KEY_FILE, 9);
-			L_PUBKEY(_PATH_HOST_XMSS_KEY_FILE, 10);
-			sensitive_data.external_keysign = 1;
+		if (options.hostbased_authentication == 1) {
+			L_CERT(_PATH_HOST_ECDSA_KEY_FILE, 0);
+			L_CERT(_PATH_HOST_ED25519_KEY_FILE, 1);
+			L_CERT(_PATH_HOST_RSA_KEY_FILE, 2);
+			L_CERT(_PATH_HOST_DSA_KEY_FILE, 3);
+			L_PUBKEY(_PATH_HOST_ECDSA_KEY_FILE, 4);
+			L_PUBKEY(_PATH_HOST_ED25519_KEY_FILE, 5);
+			L_PUBKEY(_PATH_HOST_RSA_KEY_FILE, 6);
+			L_PUBKEY(_PATH_HOST_DSA_KEY_FILE, 7);
+			L_CERT(_PATH_HOST_XMSS_KEY_FILE, 8);
+			L_PUBKEY(_PATH_HOST_XMSS_KEY_FILE, 9);
 		}
 	}
-	/*
-	 * Get rid of any extra privileges that we may have.  We will no
-	 * longer need them.  Also, extra privileges could make it very hard
-	 * to read identity files and other non-world-readable files from the
-	 * user's home directory if it happens to be on a NFS volume where
-	 * root is mapped to nobody.
-	 */
-	if (original_effective_uid == 0) {
-		PRIV_START;
-		permanently_set_uid(pw);
-	}
 
-	/*
-	 * Now that we are back to our own permissions, create ~/.ssh
-	 * directory if it doesn't already exist.
-	 */
+	/* Create ~/.ssh * directory if it doesn't already exist. */
 	if (config == NULL) {
 		r = snprintf(buf, sizeof buf, "%s%s%s", pw->pw_dir,
 		    strcmp(pw->pw_dir, "/") ? "/" : "", _PATH_SSH_USER_DIR);
@@ -1997,8 +1941,10 @@ load_public_identity_files(struct passwd *pw)
 	u_int n_ids, n_certs;
 	char *identity_files[SSH_MAX_IDENTITY_FILES];
 	struct sshkey *identity_keys[SSH_MAX_IDENTITY_FILES];
+	int identity_file_userprovided[SSH_MAX_IDENTITY_FILES];
 	char *certificate_files[SSH_MAX_CERTIFICATE_FILES];
 	struct sshkey *certificates[SSH_MAX_CERTIFICATE_FILES];
+	int certificate_file_userprovided[SSH_MAX_CERTIFICATE_FILES];
 #ifdef ENABLE_PKCS11
 	struct sshkey **keys;
 	int nkeys;
@@ -2007,8 +1953,12 @@ load_public_identity_files(struct passwd *pw)
 	n_ids = n_certs = 0;
 	memset(identity_files, 0, sizeof(identity_files));
 	memset(identity_keys, 0, sizeof(identity_keys));
+	memset(identity_file_userprovided, 0,
+	    sizeof(identity_file_userprovided));
 	memset(certificate_files, 0, sizeof(certificate_files));
 	memset(certificates, 0, sizeof(certificates));
+	memset(certificate_file_userprovided, 0,
+	    sizeof(certificate_file_userprovided));
 
 #ifdef ENABLE_PKCS11
 	if (options.pkcs11_provider != NULL &&
@@ -2051,7 +2001,8 @@ load_public_identity_files(struct passwd *pw)
 		free(options.identity_files[i]);
 		identity_files[n_ids] = filename;
 		identity_keys[n_ids] = public;
-
+		identity_file_userprovided[n_ids] =
+		    options.identity_file_userprovided[i];
 		if (++n_ids >= SSH_MAX_IDENTITY_FILES)
 			continue;
 
@@ -2080,6 +2031,8 @@ load_public_identity_files(struct passwd *pw)
 		/* NB. leave filename pointing to private key */
 		identity_files[n_ids] = xstrdup(filename);
 		identity_keys[n_ids] = public;
+		identity_file_userprovided[n_ids] =
+		    options.identity_file_userprovided[i];
 		n_ids++;
 	}
 
@@ -2117,17 +2070,24 @@ load_public_identity_files(struct passwd *pw)
 		}
 		certificate_files[n_certs] = filename;
 		certificates[n_certs] = public;
+		certificate_file_userprovided[n_certs] =
+		    options.certificate_file_userprovided[i];
 		++n_certs;
 	}
 
 	options.num_identity_files = n_ids;
 	memcpy(options.identity_files, identity_files, sizeof(identity_files));
 	memcpy(options.identity_keys, identity_keys, sizeof(identity_keys));
+	memcpy(options.identity_file_userprovided,
+	    identity_file_userprovided, sizeof(identity_file_userprovided));
 
 	options.num_certificate_files = n_certs;
 	memcpy(options.certificate_files,
 	    certificate_files, sizeof(certificate_files));
 	memcpy(options.certificates, certificates, sizeof(certificates));
+	memcpy(options.certificate_file_userprovided,
+	    certificate_file_userprovided,
+	    sizeof(certificate_file_userprovided));
 }
 
 static void

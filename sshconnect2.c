@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect2.c,v 1.280 2018/07/11 18:55:11 markus Exp $ */
+/* $OpenBSD: sshconnect2.c,v 1.282 2018/07/18 11:34:04 dtucker Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Damien Miller.  All rights reserved.
@@ -1804,7 +1804,6 @@ ssh_keysign(struct sshkey *key, u_char **sigp, size_t *lenp,
 	if (pid == 0) {
 		/* keep the socket on exec */
 		fcntl(sock, F_SETFD, 0);
-		permanently_drop_suid(getuid());
 		close(from[0]);
 		if (dup2(from[1], STDOUT_FILENO) < 0)
 			fatal("%s: dup2: %s", __func__, strerror(errno));
@@ -1982,12 +1981,8 @@ userauth_hostbased(Authctxt *authctxt)
 #ifdef DEBUG_PK
 	sshbuf_dump(b, stderr);
 #endif
-	if (authctxt->sensitive->external_keysign)
-		r = ssh_keysign(private, &sig, &siglen,
-		    sshbuf_ptr(b), sshbuf_len(b));
-	else if ((r = sshkey_sign(private, &sig, &siglen,
-	    sshbuf_ptr(b), sshbuf_len(b), NULL, datafellows)) != 0)
-		debug("%s: sshkey_sign: %s", __func__, ssh_err(r));
+	r = ssh_keysign(private, &sig, &siglen,
+	    sshbuf_ptr(b), sshbuf_len(b));
 	if (r != 0) {
 		error("sign using hostkey %s %s failed",
 		    sshkey_ssh_name(private), fp);

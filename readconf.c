@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.292 2018/07/04 13:49:31 djm Exp $ */
+/* $OpenBSD: readconf.c,v 1.294 2018/07/19 10:28:47 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -175,6 +175,7 @@ static struct {
 	{ "userknownhostsfile2", oDeprecated },
 	{ "useroaming", oDeprecated },
 	{ "usersh", oDeprecated },
+	{ "useprivilegedport", oDeprecated },
 
 	/* Unsupported options */
 	{ "afstokenpassing", oUnsupported },
@@ -207,7 +208,6 @@ static struct {
 	{ "exitonforwardfailure", oExitOnForwardFailure },
 	{ "xauthlocation", oXAuthLocation },
 	{ "gatewayports", oGatewayPorts },
-	{ "useprivilegedport", oUsePrivilegedPort },
 	{ "passwordauthentication", oPasswordAuthentication },
 	{ "kbdinteractiveauthentication", oKbdInteractiveAuthentication },
 	{ "kbdinteractivedevices", oKbdInteractiveDevices },
@@ -482,9 +482,6 @@ execute_in_shell(const char *cmd)
 	/* Fork and execute the command. */
 	if ((pid = fork()) == 0) {
 		char *argv[4];
-
-		/* Child.  Permanently give up superuser privileges. */
-		permanently_drop_suid(original_real_uid);
 
 		/* Redirect child stdin and stdout. Leave stderr */
 		if (dup2(devnull, STDIN_FILENO) == -1)
@@ -935,10 +932,6 @@ parse_time:
 
 	case oExitOnForwardFailure:
 		intptr = &options->exit_on_forward_failure;
-		goto parse_flag;
-
-	case oUsePrivilegedPort:
-		intptr = &options->use_privileged_port;
 		goto parse_flag;
 
 	case oPasswordAuthentication:
@@ -1810,7 +1803,6 @@ initialize_options(Options * options)
 	options->fwd_opts.gateway_ports = -1;
 	options->fwd_opts.streamlocal_bind_mask = (mode_t)-1;
 	options->fwd_opts.streamlocal_bind_unlink = -1;
-	options->use_privileged_port = -1;
 	options->pubkey_authentication = -1;
 	options->challenge_response_authentication = -1;
 	options->gss_authentication = -1;
@@ -1952,8 +1944,6 @@ fill_default_options(Options * options)
 		options->fwd_opts.streamlocal_bind_mask = 0177;
 	if (options->fwd_opts.streamlocal_bind_unlink == -1)
 		options->fwd_opts.streamlocal_bind_unlink = 0;
-	if (options->use_privileged_port == -1)
-		options->use_privileged_port = 0;
 	if (options->pubkey_authentication == -1)
 		options->pubkey_authentication = 1;
 	if (options->challenge_response_authentication == -1)
@@ -2585,7 +2575,6 @@ dump_client_config(Options *o, const char *host)
 	dump_cfg_fmtint(oStrictHostKeyChecking, o->strict_host_key_checking);
 	dump_cfg_fmtint(oTCPKeepAlive, o->tcp_keep_alive);
 	dump_cfg_fmtint(oTunnel, o->tun_open);
-	dump_cfg_fmtint(oUsePrivilegedPort, o->use_privileged_port);
 	dump_cfg_fmtint(oVerifyHostKeyDNS, o->verify_host_key_dns);
 	dump_cfg_fmtint(oVisualHostKey, o->visual_host_key);
 	dump_cfg_fmtint(oUpdateHostkeys, o->update_hostkeys);
