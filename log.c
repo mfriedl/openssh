@@ -95,6 +95,12 @@ static struct {
 	{ NULL,		SYSLOG_LEVEL_NOT_SET }
 };
 
+LogLevel
+log_level_get(void)
+{
+	return log_level;
+}
+
 SyslogFacility
 log_facility_number(char *name)
 {

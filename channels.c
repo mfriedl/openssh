@@ -598,9 +598,11 @@ channel_free(struct ssh *ssh, Channel *c)
 	if (c->type == SSH_CHANNEL_MUX_CLIENT)
 		mux_remove_remote_forwardings(ssh, c);
 
-	s = channel_open_message(ssh);
-	debug3("channel %d: status: %s", c->self, s);
-	free(s);
+	if (log_level_get() >= SYSLOG_LEVEL_DEBUG3) {
+		s = channel_open_message(ssh);
+		debug3("channel %d: status: %s", c->self, s);
+		free(s);
+	}
 
 	channel_close_fds(ssh, c);
 	sshbuf_free(c->input);
