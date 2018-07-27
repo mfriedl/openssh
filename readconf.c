@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.294 2018/07/19 10:28:47 dtucker Exp $ */
+/* $OpenBSD: readconf.c,v 1.296 2018/07/27 05:34:42 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -305,12 +305,8 @@ void
 add_local_forward(Options *options, const struct Forward *newfwd)
 {
 	struct Forward *fwd;
-	extern uid_t original_real_uid;
 	int i;
 
-	if (!bind_permitted(newfwd->listen_port, original_real_uid) &&
-	    newfwd->listen_path == NULL)
-		fatal("Privileged ports can only be forwarded by root.");
 	/* Don't add duplicates */
 	for (i = 0; i < options->num_local_forwards; i++) {
 		if (forward_equals(newfwd, options->local_forwards + i))
@@ -468,7 +464,6 @@ execute_in_shell(const char *cmd)
 	char *shell;
 	pid_t pid;
 	int devnull, status;
-	extern uid_t original_real_uid;
 
 	if ((shell = getenv("SHELL")) == NULL)
 		shell = _PATH_BSHELL;
