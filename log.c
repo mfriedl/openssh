@@ -1,4 +1,4 @@
-/* $OpenBSD: log.c,v 1.50 2017/05/17 01:24:17 djm Exp $ */
+/* $OpenBSD: log.c,v 1.51 2018/07/27 12:03:17 markus Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland

@@ -1,4 +1,4 @@
-/* $OpenBSD: compat.c,v 1.111 2018/07/09 21:03:30 markus Exp $ */
+/* $OpenBSD: compat.c,v 1.113 2018/08/13 02:41:05 djm Exp $ */
 /*
  * Copyright (c) 1999, 2000, 2001, 2002 Markus Friedl.  All rights reserved.
  *
