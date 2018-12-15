@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.c,v 1.131 2018/07/27 05:13:02 dtucker Exp $ */
+/* $OpenBSD: misc.c,v 1.135 2018/12/07 04:36:09 dtucker Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2005,2006 Damien Miller.  All rights reserved.
@@ -36,6 +36,7 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -299,13 +300,16 @@ pwcopy(struct passwd *pw)
 int
 a2port(const char *s)
 {
+	struct servent *se;
 	long long port;
 	const char *errstr;
 
 	port = strtonum(s, 0, 65535, &errstr);
-	if (errstr != NULL)
-		return -1;
-	return (int)port;
+	if (errstr == NULL)
+		return (int)port;
+	if ((se = getservbyname(s, "tcp")) != NULL)
+		return ntohs(se->s_port);
+	return -1;
 }
 
 int
@@ -1267,11 +1271,11 @@ bandwidth_limit_init(struct bwlimit *bw, u_int64_t kbps, size_t buflen)
 {
 	bw->buflen = buflen;
 	bw->rate = kbps;
-	bw->thresh = bw->rate;
+	bw->thresh = buflen;
 	bw->lamt = 0;
 	timerclear(&bw->bwstart);
 	timerclear(&bw->bwend);
-}	
+}
 
 /* Callback from read/write loop to insert bandwidth-limiting delays */
 void
@@ -1280,12 +1284,11 @@ bandwidth_limit(struct bwlimit *bw, size_t read_len)
 	u_int64_t waitlen;
 	struct timespec ts, rm;
 
+	bw->lamt += read_len;
 	if (!timerisset(&bw->bwstart)) {
 		monotime_tv(&bw->bwstart);
 		return;
 	}
-
-	bw->lamt += read_len;
 	if (bw->lamt < bw->thresh)
 		return;
 
@@ -1862,6 +1865,25 @@ bad:
 	return 0;
 }
 
+/*
+ * Verify that a environment variable name (not including initial '$') is
+ * valid; consisting of one or more alphanumeric or underscore characters only.
+ * Returns 1 on valid, 0 otherwise.
+ */
+int
+valid_env_name(const char *name)
+{
+	const char *cp;
+
+	if (name[0] == '\0')
+		return 0;
+	for (cp = name; *cp != '\0'; cp++) {
+		if (!isalnum((u_char)*cp) && *cp != '_')
+			return 0;
+	}
+	return 1;
+}
+
 const char *
 atoi_err(const char *nptr, int *val)
 {
@@ -1927,4 +1949,11 @@ format_absolute_time(uint64_t t, char *buf, size_t len)
 
 	localtime_r(&tt, &tm);
 	strftime(buf, len, "%Y-%m-%dT%H:%M:%S", &tm);
+}
+
+/* check if path is absolute */
+int
+path_absolute(const char *path)
+{
+	return (*path == '/') ? 1 : 0;
 }

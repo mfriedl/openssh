@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect2.c,v 1.287 2018/09/14 05:26:27 djm Exp $ */
+/* $OpenBSD: sshconnect2.c,v 1.290 2018/11/28 06:00:38 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Damien Miller.  All rights reserved.
@@ -371,7 +371,6 @@ ssh_userauth2(const char *local_user, const char *server_user, char *host,
 
 	/* setup authentication context */
 	memset(&authctxt, 0, sizeof(authctxt));
-	pubkey_prepare(&authctxt);
 	authctxt.server_user = server_user;
 	authctxt.local_user = local_user;
 	authctxt.host = host;
@@ -384,6 +383,7 @@ ssh_userauth2(const char *local_user, const char *server_user, char *host,
 	authctxt.active_ktype = authctxt.oktypes = authctxt.ktypes = NULL;
 	authctxt.info_req_seen = 0;
 	authctxt.agent_fd = -1;
+	pubkey_prepare(&authctxt);
 	if (authctxt.method == NULL)
 		fatal("ssh_userauth2: internal error: cannot send userauth none request");
 
@@ -950,8 +950,7 @@ userauth_passwd(Authctxt *authctxt)
 {
 	struct ssh *ssh = active_state; /* XXX */
 	static int attempt = 0;
-	char prompt[256];
-	char *password;
+	char *password, *prompt = NULL;
 	const char *host = options.host_key_alias ?  options.host_key_alias :
 	    authctxt->host;
 	int r;
@@ -962,8 +961,7 @@ userauth_passwd(Authctxt *authctxt)
 	if (attempt != 1)
 		error("Permission denied, please try again.");
 
-	snprintf(prompt, sizeof(prompt), "%.30s@%.128s's password: ",
-	    authctxt->server_user, host);
+	xasprintf(&prompt, "%s@%s's password: ", authctxt->server_user, host);
 	password = read_passphrase(prompt, 0);
 	if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_REQUEST)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->server_user)) != 0 ||
@@ -975,7 +973,8 @@ userauth_passwd(Authctxt *authctxt)
 	    (r = sshpkt_send(ssh)) != 0)
 		fatal("%s: %s", __func__, ssh_err(r));
 
-	if (password)
+	free(prompt);
+	if (password != NULL)
 		freezero(password, strlen(password));
 
 	ssh_dispatch_set(ssh, SSH2_MSG_USERAUTH_PASSWD_CHANGEREQ,
@@ -1080,7 +1079,8 @@ key_sig_algorithm(struct ssh *ssh, const struct sshkey *key)
 	 * newer (SHA2) algorithms.
 	 */
 	if (ssh == NULL || ssh->kex->server_sig_algs == NULL ||
-	    (key->type != KEY_RSA && key->type != KEY_RSA_CERT)) {
+	    (key->type != KEY_RSA && key->type != KEY_RSA_CERT) ||
+	    (key->type == KEY_RSA_CERT && (datafellows & SSH_BUG_SIGTYPE))) {
 		/* Filter base key signature alg against our configuration */
 		return match_list(sshkey_ssh_name(key),
 		    options.pubkey_key_types, NULL);
@@ -1611,8 +1611,10 @@ pubkey_cleanup(Authctxt *authctxt)
 {
 	Identity *id;
 
-	if (authctxt->agent_fd != -1)
+	if (authctxt->agent_fd != -1) {
 		ssh_close_authentication_socket(authctxt->agent_fd);
+		authctxt->agent_fd = -1;
+	}
 	for (id = TAILQ_FIRST(&authctxt->keys); id;
 	    id = TAILQ_FIRST(&authctxt->keys)) {
 		TAILQ_REMOVE(&authctxt->keys, id, next);

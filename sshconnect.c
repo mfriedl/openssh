@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect.c,v 1.304 2018/07/27 05:34:42 dtucker Exp $ */
+/* $OpenBSD: sshconnect.c,v 1.308 2018/11/18 22:43:29 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -65,6 +65,7 @@ static int matching_host_key_dns = 0;
 static pid_t proxy_command_pid = 0;
 
 /* import */
+extern int debug_flag;
 extern Options options;
 extern char *__progname;
 
@@ -84,6 +85,24 @@ expand_proxy_command(const char *proxy_command, const char *user,
 	    "r", options.user, (char *)NULL);
 	free(tmp);
 	return ret;
+}
+
+static void
+stderr_null(void)
+{
+	int devnull;
+
+	if ((devnull = open(_PATH_DEVNULL, O_WRONLY)) == -1) {
+		error("Can't open %s for stderr redirection: %s",
+		    _PATH_DEVNULL, strerror(errno));
+		return;
+	}
+	if (devnull == STDERR_FILENO)
+		return;
+	if (dup2(devnull, STDERR_FILENO) == -1)
+		error("Cannot redirect stderr to %s", _PATH_DEVNULL);
+	if (devnull > STDERR_FILENO)
+		close(devnull);
 }
 
 /*
@@ -128,9 +147,13 @@ ssh_proxy_fdpass_connect(struct ssh *ssh, const char *host, u_short port,
 			close(sp[0]);
 
 		/*
-		 * Stderr is left as it is so that error messages get
-		 * printed on the user's terminal.
+		 * Stderr is left for non-ControlPersist connections is so
+		 * error messages may be printed on the user's terminal.
 		 */
+		if (!debug_flag && options.control_path != NULL &&
+		    options.control_persist)
+			stderr_null();
+
 		argv[0] = shell;
 		argv[1] = "-c";
 		argv[2] = command_string;
@@ -206,8 +229,14 @@ ssh_proxy_connect(struct ssh *ssh, const char *host, u_short port,
 		/* Cannot be 1 because pin allocated two descriptors. */
 		close(pout[1]);
 
-		/* Stderr is left as it is so that error messages get
-		   printed on the user's terminal. */
+		/*
+		 * Stderr is left for non-ControlPersist connections is so
+		 * error messages may be printed on the user's terminal.
+		 */
+		if (!debug_flag && options.control_path != NULL &&
+		    options.control_persist)
+			stderr_null();
+
 		argv[0] = shell;
 		argv[1] = "-c";
 		argv[2] = command_string;
@@ -350,10 +379,6 @@ ssh_create_socket(struct addrinfo *ai)
 		}
 		if (res == NULL) {
 			error("getaddrinfo: no addrs");
-			goto fail;
-		}
-		if (res->ai_addrlen > sizeof(bindaddr)) {
-			error("%s: addr doesn't fit", __func__);
 			goto fail;
 		}
 		memcpy(&bindaddr, res->ai_addr, res->ai_addrlen);
@@ -711,19 +736,28 @@ confirm(const char *prompt)
 }
 
 static int
-check_host_cert(const char *host, const struct sshkey *host_key)
+check_host_cert(const char *host, const struct sshkey *key)
 {
 	const char *reason;
+	int r;
 
-	if (sshkey_cert_check_authority(host_key, 1, 0, host, &reason) != 0) {
+	if (sshkey_cert_check_authority(key, 1, 0, host, &reason) != 0) {
 		error("%s", reason);
 		return 0;
 	}
-	if (sshbuf_len(host_key->cert->critical) != 0) {
+	if (sshbuf_len(key->cert->critical) != 0) {
 		error("Certificate for %s contains unsupported "
 		    "critical options(s)", host);
 		return 0;
 	}
+	if ((r = sshkey_check_cert_sigtype(key,
+	    options.ca_sign_algorithms)) != 0) {
+		logit("%s: certificate signature algorithm %s: %s", __func__,
+		    (key->cert == NULL || key->cert->signature_type == NULL) ?
+		    "(null)" : key->cert->signature_type, ssh_err(r));
+		return 0;
+	}
+
 	return 1;
 }
 

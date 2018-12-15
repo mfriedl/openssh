@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.h,v 1.74 2018/07/27 05:13:02 dtucker Exp $ */
+/* $OpenBSD: misc.h,v 1.77 2018/12/07 04:36:09 dtucker Exp $ */
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -74,9 +74,11 @@ double	 monotime_double(void);
 void	 lowercase(char *s);
 int	 unix_listener(const char *, int, int);
 int	 valid_domain(char *, int, const char **);
+int	 valid_env_name(const char *);
 const char *atoi_err(const char *, int *);
 int	 parse_absolute_time(const char *, uint64_t *);
 void	 format_absolute_time(uint64_t, char *, size_t);
+int	 path_absolute(const char *);
 
 struct passwd *pwcopy(struct passwd *);
 const char *ssh_gai_strerror(int);
@@ -131,7 +133,9 @@ void		put_u32_le(void *, u_int32_t)
 
 struct bwlimit {
 	size_t buflen;
-	u_int64_t rate, thresh, lamt;
+	u_int64_t rate;		/* desired rate in kbit/s */
+	u_int64_t thresh;	/* threshold after which we'll check timers */
+	u_int64_t lamt;		/* amount written in last timer interval */
 	struct timeval bwstart, bwend;
 };
 
