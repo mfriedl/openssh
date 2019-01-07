@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect2.c,v 1.290 2018/11/28 06:00:38 djm Exp $ */
+/* $OpenBSD: sshconnect2.c,v 1.292 2019/01/04 03:27:50 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Damien Miller.  All rights reserved.
@@ -149,11 +149,10 @@ order_hostkeyalgs(char *host, struct sockaddr *hostaddr, u_short port)
 }
 
 void
-ssh_kex2(char *host, struct sockaddr *hostaddr, u_short port)
+ssh_kex2(struct ssh *ssh, char *host, struct sockaddr *hostaddr, u_short port)
 {
 	char *myproposal[PROPOSAL_MAX] = { KEX_CLIENT };
 	char *s, *all_key;
-	struct kex *kex;
 	int r;
 
 	xxx_host = host;
@@ -193,34 +192,31 @@ ssh_kex2(char *host, struct sockaddr *hostaddr, u_short port)
 		    options.rekey_interval);
 
 	/* start key exchange */
-	if ((r = kex_setup(active_state, myproposal)) != 0)
+	if ((r = kex_setup(ssh, myproposal)) != 0)
 		fatal("kex_setup: %s", ssh_err(r));
-	kex = active_state->kex;
 #ifdef WITH_OPENSSL
-	kex->kex[KEX_DH_GRP1_SHA1] = kexdh_client;
-	kex->kex[KEX_DH_GRP14_SHA1] = kexdh_client;
-	kex->kex[KEX_DH_GRP14_SHA256] = kexdh_client;
-	kex->kex[KEX_DH_GRP16_SHA512] = kexdh_client;
-	kex->kex[KEX_DH_GRP18_SHA512] = kexdh_client;
-	kex->kex[KEX_DH_GEX_SHA1] = kexgex_client;
-	kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
-	kex->kex[KEX_ECDH_SHA2] = kexecdh_client;
+	ssh->kex->kex[KEX_DH_GRP1_SHA1] = kexdh_client;
+	ssh->kex->kex[KEX_DH_GRP14_SHA1] = kexdh_client;
+	ssh->kex->kex[KEX_DH_GRP14_SHA256] = kexdh_client;
+	ssh->kex->kex[KEX_DH_GRP16_SHA512] = kexdh_client;
+	ssh->kex->kex[KEX_DH_GRP18_SHA512] = kexdh_client;
+	ssh->kex->kex[KEX_DH_GEX_SHA1] = kexgex_client;
+	ssh->kex->kex[KEX_DH_GEX_SHA256] = kexgex_client;
+	ssh->kex->kex[KEX_ECDH_SHA2] = kexecdh_client;
 #endif
-	kex->kex[KEX_C25519_SHA256] = kexc25519_client;
-	kex->client_version_string=client_version_string;
-	kex->server_version_string=server_version_string;
-	kex->verify_host_key=&verify_host_key_callback;
+	ssh->kex->kex[KEX_C25519_SHA256] = kexc25519_client;
+	ssh->kex->verify_host_key=&verify_host_key_callback;
 
-	ssh_dispatch_run_fatal(active_state, DISPATCH_BLOCK, &kex->done);
+	ssh_dispatch_run_fatal(ssh, DISPATCH_BLOCK, &ssh->kex->done);
 
 	/* remove ext-info from the KEX proposals for rekeying */
 	myproposal[PROPOSAL_KEX_ALGS] =
 	    compat_kex_proposal(options.kex_algorithms);
-	if ((r = kex_prop2buf(kex->my, myproposal)) != 0)
+	if ((r = kex_prop2buf(ssh->kex->my, myproposal)) != 0)
 		fatal("kex_prop2buf: %s", ssh_err(r));
 
-	session_id2 = kex->session_id;
-	session_id2_len = kex->session_id_len;
+	session_id2 = ssh->kex->session_id;
+	session_id2_len = ssh->kex->session_id_len;
 
 #ifdef DEBUG_KEXDH
 	/* send 1st encrypted/maced/compressed message */
@@ -260,7 +256,6 @@ struct cauthctxt {
 	struct cauthmethod *method;
 	sig_atomic_t success;
 	char *authlist;
-	int attempt;
 	/* pubkey */
 	struct idlist keys;
 	int agent_fd;
@@ -270,6 +265,9 @@ struct cauthctxt {
 	const char *active_ktype;
 	/* kbd-interactive */
 	int info_req_seen;
+	int attempt_kbdint;
+	/* password */
+	int attempt_passwd;
 	/* generic */
 	void *methoddata;
 };
@@ -357,10 +355,9 @@ Authmethod authmethods[] = {
 };
 
 void
-ssh_userauth2(const char *local_user, const char *server_user, char *host,
-    Sensitive *sensitive)
+ssh_userauth2(struct ssh *ssh, const char *local_user,
+    const char *server_user, char *host, Sensitive *sensitive)
 {
-	struct ssh *ssh = active_state;
 	Authctxt authctxt;
 	int r;
 
@@ -382,10 +379,14 @@ ssh_userauth2(const char *local_user, const char *server_user, char *host,
 	authctxt.sensitive = sensitive;
 	authctxt.active_ktype = authctxt.oktypes = authctxt.ktypes = NULL;
 	authctxt.info_req_seen = 0;
+	authctxt.attempt_kbdint = 0;
+	authctxt.attempt_passwd = 0;
 	authctxt.agent_fd = -1;
 	pubkey_prepare(&authctxt);
-	if (authctxt.method == NULL)
-		fatal("ssh_userauth2: internal error: cannot send userauth none request");
+	if (authctxt.method == NULL) {
+		fatal("%s: internal error: cannot send userauth none request",
+		    __func__);
+	}
 
 	if ((r = sshpkt_start(ssh, SSH2_MSG_SERVICE_REQUEST)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, "ssh-userauth")) != 0 ||
@@ -949,16 +950,15 @@ int
 userauth_passwd(Authctxt *authctxt)
 {
 	struct ssh *ssh = active_state; /* XXX */
-	static int attempt = 0;
 	char *password, *prompt = NULL;
 	const char *host = options.host_key_alias ?  options.host_key_alias :
 	    authctxt->host;
 	int r;
 
-	if (attempt++ >= options.number_of_password_prompts)
+	if (authctxt->attempt_passwd++ >= options.number_of_password_prompts)
 		return 0;
 
-	if (attempt != 1)
+	if (authctxt->attempt_passwd != 1)
 		error("Permission denied, please try again.");
 
 	xasprintf(&prompt, "%s@%s's password: ", authctxt->server_user, host);
@@ -1700,13 +1700,12 @@ int
 userauth_kbdint(Authctxt *authctxt)
 {
 	struct ssh *ssh = active_state; /* XXX */
-	static int attempt = 0;
 	int r;
 
-	if (attempt++ >= options.number_of_password_prompts)
+	if (authctxt->attempt_kbdint++ >= options.number_of_password_prompts)
 		return 0;
 	/* disable if no SSH2_MSG_USERAUTH_INFO_REQUEST has been seen */
-	if (attempt > 1 && !authctxt->info_req_seen) {
+	if (authctxt->attempt_kbdint > 1 && !authctxt->info_req_seen) {
 		debug3("userauth_kbdint: disable: no info_req_seen");
 		ssh_dispatch_set(ssh, SSH2_MSG_USERAUTH_INFO_REQUEST, NULL);
 		return 0;
