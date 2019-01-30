@@ -1,4 +1,4 @@
-/* $OpenBSD: packet.c,v 1.280 2019/01/19 21:33:14 djm Exp $ */
+/* $OpenBSD: packet.c,v 1.282 2019/01/21 10:35:09 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -2516,6 +2516,12 @@ sshpkt_get_cstring(struct ssh *ssh, char **valp, size_t *lenp)
 	return sshbuf_get_cstring(ssh->state->incoming_packet, valp, lenp);
 }
 
+int
+sshpkt_getb_froms(struct ssh *ssh, struct sshbuf **valp)
+{
+	return sshbuf_froms(ssh->state->incoming_packet, valp);
+}
+
 #ifdef WITH_OPENSSL
 int
 sshpkt_get_ec(struct ssh *ssh, EC_POINT *v, const EC_GROUP *g)
@@ -2523,11 +2529,10 @@ sshpkt_get_ec(struct ssh *ssh, EC_POINT *v, const EC_GROUP *g)
 	return sshbuf_get_ec(ssh->state->incoming_packet, v, g);
 }
 
-
 int
-sshpkt_get_bignum2(struct ssh *ssh, BIGNUM *v)
+sshpkt_get_bignum2(struct ssh *ssh, BIGNUM **valp)
 {
-	return sshbuf_get_bignum2(ssh->state->incoming_packet, v);
+	return sshbuf_get_bignum2(ssh->state->incoming_packet, valp);
 }
 #endif /* WITH_OPENSSL */
 
