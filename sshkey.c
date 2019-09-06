@@ -1,4 +1,4 @@
-/* $OpenBSD: sshkey.c,v 1.81 2019/07/16 13:18:39 djm Exp $ */
+/* $OpenBSD: sshkey.c,v 1.83 2019/09/06 05:23:55 djm Exp $ */
 /*
  * Copyright (c) 2000, 2001 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Alexander von Gernler.  All rights reserved.
@@ -84,7 +84,6 @@ int	sshkey_private_serialize_opt(struct sshkey *key,
     struct sshbuf *buf, enum sshkey_serialize_rep);
 static int sshkey_from_blob_internal(struct sshbuf *buf,
     struct sshkey **keyp, int allow_cert);
-static int get_sigtype(const u_char *sig, size_t siglen, char **sigtypep);
 
 /* Supported key types */
 struct keytype {
@@ -1825,12 +1824,14 @@ sshkey_from_private(const struct sshkey *k, struct sshkey **pkp)
 	r = 0;
  out:
 	sshkey_free(n);
+#ifdef WITH_OPENSSL
 	BN_clear_free(rsa_n_dup);
 	BN_clear_free(rsa_e_dup);
 	BN_clear_free(dsa_p_dup);
 	BN_clear_free(dsa_q_dup);
 	BN_clear_free(dsa_g_dup);
 	BN_clear_free(dsa_pub_key_dup);
+#endif /* WITH_OPENSSL */
 
 	return r;
 }
@@ -2158,7 +2159,8 @@ cert_parse(struct sshbuf *b, struct sshkey *key, struct sshbuf *certbuf)
 	if ((ret = sshkey_verify(key->cert->signature_key, sig, slen,
 	    sshbuf_ptr(key->cert->certblob), signed_len, NULL, 0)) != 0)
 		goto out;
-	if ((ret = get_sigtype(sig, slen, &key->cert->signature_type)) != 0)
+	if ((ret = sshkey_get_sigtype(sig, slen,
+	    &key->cert->signature_type)) != 0)
 		goto out;
 
 	/* Success */
@@ -2172,6 +2174,7 @@ cert_parse(struct sshbuf *b, struct sshkey *key, struct sshbuf *certbuf)
 	return ret;
 }
 
+#ifdef WITH_OPENSSL
 static int
 check_rsa_length(const RSA *rsa)
 {
@@ -2182,6 +2185,7 @@ check_rsa_length(const RSA *rsa)
 		return SSH_ERR_KEY_LENGTH;
 	return 0;
 }
+#endif /* WITH_OPENSSL */
 
 static int
 sshkey_from_blob_internal(struct sshbuf *b, struct sshkey **keyp,
@@ -2452,8 +2456,8 @@ sshkey_froms(struct sshbuf *buf, struct sshkey **keyp)
 	return r;
 }
 
-static int
-get_sigtype(const u_char *sig, size_t siglen, char **sigtypep)
+int
+sshkey_get_sigtype(const u_char *sig, size_t siglen, char **sigtypep)
 {
 	int r;
 	struct sshbuf *b = NULL;
@@ -2535,7 +2539,7 @@ sshkey_check_sigtype(const u_char *sig, size_t siglen,
 		return 0;
 	if ((expected_alg = sshkey_sigalg_by_name(requested_alg)) == NULL)
 		return SSH_ERR_INVALID_ARGUMENT;
-	if ((r = get_sigtype(sig, siglen, &sigtype)) != 0)
+	if ((r = sshkey_get_sigtype(sig, siglen, &sigtype)) != 0)
 		return r;
 	r = strcmp(expected_alg, sigtype) == 0;
 	free(sigtype);
@@ -2805,7 +2809,7 @@ sshkey_certify_custom(struct sshkey *k, struct sshkey *ca, const char *alg,
 	    sshbuf_len(cert), alg, 0, signer_ctx)) != 0)
 		goto out;
 	/* Check and update signature_type against what was actually used */
-	if ((ret = get_sigtype(sig_blob, sig_len, &sigtype)) != 0)
+	if ((ret = sshkey_get_sigtype(sig_blob, sig_len, &sigtype)) != 0)
 		goto out;
 	if (alg != NULL && strcmp(alg, sigtype) != 0) {
 		ret = SSH_ERR_SIGN_ALG_UNSUPPORTED;

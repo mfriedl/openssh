@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh_api.c,v 1.15 2019/01/21 10:38:54 djm Exp $ */
+/* $OpenBSD: ssh_api.c,v 1.17 2019/09/06 05:23:55 djm Exp $ */
 /*
  * Copyright (c) 2012 Markus Friedl.  All rights reserved.
  *
@@ -14,6 +14,11 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#include <sys/types.h>
+
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "ssh_api.h"
 #include "compat.h"
@@ -46,7 +51,10 @@ int	_ssh_host_key_sign(struct ssh *, struct sshkey *, struct sshkey *,
 int	use_privsep = 0;
 int	mm_sshkey_sign(struct sshkey *, u_char **, u_int *,
     u_char *, u_int, char *, u_int);
+
+#ifdef WITH_OPENSSL
 DH	*mm_choose_dh(int, int, int);
+#endif
 
 /* Define these two variables here so that they are part of the library */
 u_char *session_id2 = NULL;
@@ -59,11 +67,13 @@ mm_sshkey_sign(struct sshkey *key, u_char **sigp, u_int *lenp,
 	return (-1);
 }
 
+#ifdef WITH_OPENSSL
 DH *
 mm_choose_dh(int min, int nbits, int max)
 {
 	return (NULL);
 }
+#endif
 
 /* API */
 
@@ -77,7 +87,9 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
 	int r;
 
 	if (!called) {
+#ifdef WITH_OPENSSL
 		OpenSSL_add_all_algorithms();
+#endif
 		called = 1;
 	}
 

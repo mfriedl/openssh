@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-pkcs11-helper.c,v 1.19 2019/06/06 05:13:13 otto Exp $ */
+/* $OpenBSD: ssh-pkcs11-helper.c,v 1.21 2019/09/06 05:23:55 djm Exp $ */
 /*
  * Copyright (c) 2010 Markus Friedl.  All rights reserved.
  *
@@ -19,6 +19,7 @@
 #include <sys/queue.h>
 #include <sys/time.h>
 
+#include <stdlib.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdarg.h>
@@ -33,6 +34,8 @@
 #include "authfd.h"
 #include "ssh-pkcs11.h"
 #include "ssherr.h"
+
+#ifdef WITH_OPENSSL
 
 /* borrows code from sftp-server and ssh-agent */
 
@@ -412,3 +415,18 @@ main(int argc, char **argv)
 			fatal("%s: buffer error: %s", __func__, ssh_err(r));
 	}
 }
+
+#else /* WITH_OPENSSL */
+void
+cleanup_exit(int i)
+{
+	_exit(i);
+}
+
+int
+main(int argc, char **argv)
+{
+	fprintf(stderr, "PKCS#11 code is not enabled\n");
+	return 1;
+}
+#endif /* WITH_OPENSSL */
