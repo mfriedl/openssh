@@ -1,4 +1,4 @@
-/* $OpenBSD: auth.c,v 1.140 2019/09/06 04:53:27 djm Exp $ */
+/* $OpenBSD: auth.c,v 1.142 2019/10/16 06:05:39 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
@@ -61,7 +61,6 @@
 #endif
 #include "authfile.h"
 #include "monitor_wrap.h"
-#include "authfile.h"
 #include "ssherr.h"
 #include "compat.h"
 #include "channels.h"
@@ -400,7 +399,7 @@ check_key_in_hostfiles(struct passwd *pw, struct sshkey *key, const char *host,
 	host_status = check_key_in_hostkeys(hostkeys, key, &found);
 	if (host_status == HOST_REVOKED)
 		error("WARNING: revoked key for %s attempted authentication",
-		    found->host);
+		    host);
 	else if (host_status == HOST_OK)
 		debug("%s: key for %s found at %s:%ld", __func__,
 		    found->host, found->file, found->line);

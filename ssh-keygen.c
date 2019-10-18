@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.348 2019/09/06 05:23:55 djm Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.356 2019/10/16 06:03:30 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -88,7 +88,7 @@ static int print_bubblebabble = 0;
 static int fingerprint_hash = SSH_FP_HASH_DEFAULT;
 
 /* The identity file name, given on the command line or entered by the user. */
-static char identity_file[1024];
+static char identity_file[PATH_MAX];
 static int have_identity = 0;
 
 /* This is set to the passphrase if given on the command line. */
@@ -636,6 +636,7 @@ do_convert_from_ssh2(struct passwd *pw, struct sshkey **k, int *private)
 		*k = do_convert_private_ssh2(buf);
 	else if ((r = sshkey_fromb(buf, k)) != 0)
 		fatal("decode blob failed: %s", ssh_err(r));
+	sshbuf_free(buf);
 	fclose(fp);
 }
 
@@ -2649,8 +2650,9 @@ verify(const char *signature, const char *sig_namespace, const char *principal,
 		}
 	}
 
-	if ((r = sshsig_check_allowed_keys(allowed_keys, sign_key,
-	    principal, sig_namespace)) != 0) {
+	if (allowed_keys != NULL &&
+	    (r = sshsig_check_allowed_keys(allowed_keys, sign_key,
+					   principal, sig_namespace)) != 0) {
 		debug3("sshsig_check_allowed_keys failed: %s", ssh_err(r));
 		goto done;
 	}
@@ -2664,9 +2666,15 @@ done:
 				fatal("%s: sshkey_fingerprint failed",
 				    __func__);
 			}
-			printf("Good \"%s\" signature for %s with %s key %s\n",
-			    sig_namespace, principal,
-			    sshkey_type(sign_key), fp);
+			if (principal == NULL) {
+				printf("Good \"%s\" signature with %s key %s\n",
+				       sig_namespace, sshkey_type(sign_key), fp);
+
+			} else {
+				printf("Good \"%s\" signature for %s with %s key %s\n",
+				       sig_namespace, principal,
+				       sshkey_type(sign_key), fp);
+			}
 		} else {
 			printf("Could not verify signature.\n");
 		}
@@ -2684,14 +2692,14 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: ssh-keygen [-q] [-b bits] [-t dsa | ecdsa | ed25519 | rsa] [-m format]\n"
-	    "                  [-N new_passphrase] [-C comment] [-f output_keyfile]\n"
-	    "       ssh-keygen -p [-P old_passphrase] [-N new_passphrase] [-m format]\n"
-	    "                   [-f keyfile]\n"
-	    "       ssh-keygen -i [-m key_format] [-f input_keyfile]\n"
-	    "       ssh-keygen -e [-m key_format] [-f input_keyfile]\n"
+	    "usage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile] [-m format]\n"
+	    "                  [-N new_passphrase] [-t dsa | ecdsa | ed25519 | rsa]\n"
+	    "       ssh-keygen -p [-f keyfile] [-m format] [-N new_passphrase]\n"
+	    "                   [-P old_passphrase]\n"
+	    "       ssh-keygen -i [-f input_keyfile] [-m key_format]\n"
+	    "       ssh-keygen -e [-f input_keyfile] [-m key_format]\n"
 	    "       ssh-keygen -y [-f input_keyfile]\n"
-	    "       ssh-keygen -c [-P passphrase] [-C comment] [-f keyfile]\n"
+	    "       ssh-keygen -c [-C comment] [-f keyfile] [-P passphrase]\n"
 	    "       ssh-keygen -l [-v] [-E fingerprint_hash] [-f input_keyfile]\n"
 	    "       ssh-keygen -B [-f input_keyfile]\n");
 #ifdef ENABLE_PKCS11
@@ -2699,26 +2707,27 @@ usage(void)
 	    "       ssh-keygen -D pkcs11\n");
 #endif
 	fprintf(stderr,
-	    "       ssh-keygen -F hostname [-f known_hosts_file] [-l]\n"
+	    "       ssh-keygen -F hostname [-lv] [-f known_hosts_file]\n"
 	    "       ssh-keygen -H [-f known_hosts_file]\n"
 	    "       ssh-keygen -R hostname [-f known_hosts_file]\n"
-	    "       ssh-keygen -r hostname [-f input_keyfile] [-g]\n"
+	    "       ssh-keygen -r hostname [-g] [-f input_keyfile]\n"
 #ifdef WITH_OPENSSL
 	    "       ssh-keygen -G output_file [-v] [-b bits] [-M memory] [-S start_point]\n"
-	    "       ssh-keygen -T output_file -f input_file [-v] [-a rounds] [-J num_lines]\n"
+	    "       ssh-keygen -f input_file -T output_file [-v] [-a rounds] [-J num_lines]\n"
 	    "                  [-j start_line] [-K checkpt] [-W generator]\n"
 #endif
-	    "       ssh-keygen -s ca_key -I certificate_identity [-h] [-U]\n"
-	    "                  [-D pkcs11_provider] [-n principals] [-O option]\n"
-	    "                  [-V validity_interval] [-z serial_number] file ...\n"
+	    "       ssh-keygen -I certificate_identity -s ca_key [-hU] [-D pkcs11_provider]\n"
+	    "                  [-n principals] [-O option] [-V validity_interval]\n"
+	    "                  [-z serial_number] file ...\n"
 	    "       ssh-keygen -L [-f input_keyfile]\n"
-	    "       ssh-keygen -A\n"
+	    "       ssh-keygen -A [-f prefix_path]\n"
 	    "       ssh-keygen -k -f krl_file [-u] [-s ca_public] [-z version_number]\n"
 	    "                  file ...\n"
 	    "       ssh-keygen -Q -f krl_file file ...\n"
-	    "       ssh-keygen -Y sign -f sign_key -n namespace\n"
-	    "       ssh-keygen -Y verify -I signer_identity -s signature_file\n"
-	    "                  -n namespace -f allowed_keys [-r revoked_keys]\n");
+	    "       ssh-keygen -Y check-novalidate -n namespace -s signature_file\n"
+	    "       ssh-keygen -Y sign -f key_file -n namespace file ...\n"
+	    "       ssh-keygen -Y verify -f allowed_signers_file -I signer_identity\n"
+	    "       		-n namespace -s signature_file [-r revocation_file]\n");
 	exit(1);
 }
 
@@ -3004,7 +3013,7 @@ main(int argc, char **argv)
 	argc -= optind;
 
 	if (sign_op != NULL) {
-		if (cert_principals == NULL) {
+		if (cert_principals == NULL || *cert_principals == '\0') {
 			error("Too few arguments for sign/verify: "
 			    "missing namespace");
 			exit(1);
@@ -3016,6 +3025,14 @@ main(int argc, char **argv)
 				exit(1);
 			}
 			return sign(identity_file, cert_principals, argc, argv);
+		} else if (strncmp(sign_op, "check-novalidate", 16) == 0) {
+			if (ca_key_path == NULL) {
+				error("Too few arguments for check-novalidate: "
+				      "missing signature file");
+				exit(1);
+			}
+			return verify(ca_key_path, cert_principals,
+				      NULL, NULL, NULL);
 		} else if (strncmp(sign_op, "verify", 6) == 0) {
 			if (ca_key_path == NULL) {
 				error("Too few arguments for verify: "
@@ -3092,7 +3109,10 @@ main(int argc, char **argv)
 		do_convert_to(pw);
 	if (convert_from)
 		do_convert_from(pw);
-#endif
+#else /* WITH_OPENSSL */
+	if (convert_to || convert_from)
+		fatal("key conversion disabled at compile time");
+#endif /* WITH_OPENSSL */
 	if (print_public)
 		do_print_public(pw);
 	if (rr_hostname != NULL) {
