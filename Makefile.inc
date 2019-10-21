@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.69 2019/09/06 05:59:41 djm Exp $
+#	$OpenBSD: Makefile.inc,v 1.73 2019/10/31 21:37:33 djm Exp $
 
 .include <bsd.own.mk>
 
@@ -67,9 +67,11 @@ SRCS_KEY+=	poly1305.c
 .if (${OPENSSL:L} == "yes")
 SRCS_KEY+=	ssh-dss.c
 SRCS_KEY+=	ssh-ecdsa.c
+SRCS_KEY+=	ssh-ecdsa-sk.c
 SRCS_KEY+=	ssh-rsa.c
 SRCS_KEY+=	sshbuf-getput-crypto.c
 SRCS_KEY+=	digest-openssl.c
+SRCS_KEY+=	ssh-sk.c
 .else
 SRCS_KEY+=	cipher-aesctr.c
 SRCS_KEY+=	rijndael.c

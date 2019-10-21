@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.356 2019/10/16 06:03:30 djm Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.361 2019/11/08 03:54:02 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -52,6 +52,8 @@
 #include "utf8.h"
 #include "authfd.h"
 #include "sshsig.h"
+#include "ssh-sk.h"
+#include "sk-api.h" /* XXX for SSH_SK_USER_PRESENCE_REQD; remove */
 
 #ifdef ENABLE_PKCS11
 #include "ssh-pkcs11.h"
@@ -142,6 +144,9 @@ static char *key_type_name = NULL;
 
 /* Load key from this PKCS#11 provider */
 static char *pkcs11provider = NULL;
+
+/* FIDO/U2F provider to use */
+static char *sk_provider = NULL;
 
 /* Format for writing private keys */
 static int private_key_format = SSHKEY_PRIVATE_OPENSSH;
@@ -256,6 +261,10 @@ ask_filename(struct passwd *pw, const char *prompt)
 		case KEY_ECDSA_CERT:
 		case KEY_ECDSA:
 			name = _PATH_SSH_CLIENT_ID_ECDSA;
+			break;
+		case KEY_ECDSA_SK_CERT:
+		case KEY_ECDSA_SK:
+			name = _PATH_SSH_CLIENT_ID_ECDSA_SK;
 			break;
 		case KEY_RSA_CERT:
 		case KEY_RSA:
@@ -553,8 +562,10 @@ do_convert_private_ssh2(struct sshbuf *b)
 		error("%s: remaining bytes in key blob %d", __func__, rlen);
 
 	/* try the key */
-	if (sshkey_sign(key, &sig, &slen, data, sizeof(data), NULL, 0) != 0 ||
-	    sshkey_verify(key, sig, slen, data, sizeof(data), NULL, 0) != 0) {
+	if (sshkey_sign(key, &sig, &slen, data, sizeof(data),
+	    NULL, NULL, 0) != 0 ||
+	    sshkey_verify(key, sig, slen, data, sizeof(data),
+	    NULL, 0) != 0) {
 		sshkey_free(key);
 		free(sig);
 		return NULL;
@@ -1679,7 +1690,7 @@ load_pkcs11_key(char *path)
 static int
 agent_signer(struct sshkey *key, u_char **sigp, size_t *lenp,
     const u_char *data, size_t datalen,
-    const char *alg, u_int compat, void *ctx)
+    const char *alg, const char *provider, u_int compat, void *ctx)
 {
 	int *agent_fdp = (int *)ctx;
 
@@ -1791,11 +1802,13 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 
 		if (agent_fd != -1 && (ca->flags & SSHKEY_FLAG_EXT) != 0) {
 			if ((r = sshkey_certify_custom(public, ca,
-			    key_type_name, agent_signer, &agent_fd)) != 0)
+			    key_type_name, sk_provider, agent_signer,
+			    &agent_fd)) != 0)
 				fatal("Couldn't certify key %s via agent: %s",
 				    tmp, ssh_err(r));
 		} else {
-			if ((sshkey_certify(public, ca, key_type_name)) != 0)
+			if ((sshkey_certify(public, ca, key_type_name,
+			    sk_provider)) != 0)
 				fatal("Couldn't certify key %s: %s",
 				    tmp, ssh_err(r));
 		}
@@ -2479,7 +2492,7 @@ sign_one(struct sshkey *signkey, const char *filename, int fd,
 		else
 			fprintf(stderr, "Signing file %s\n", filename);
 	}
-	if ((r = sshsig_sign_fd(signkey, NULL, fd, sig_namespace,
+	if ((r = sshsig_sign_fd(signkey, NULL, sk_provider, fd, sig_namespace,
 	    &sigbuf, signer, signer_ctx)) != 0) {
 		error("Signing %s failed: %s", filename, ssh_err(r));
 		goto out;
@@ -2693,7 +2706,8 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile] [-m format]\n"
-	    "                  [-N new_passphrase] [-t dsa | ecdsa | ed25519 | rsa]\n"
+	    "                  [-t dsa | ecdsa | ecdsa-sk | ed25519 | rsa]\n"
+	    "                  [-N new_passphrase] [-w provider] [-x flags]\n"
 	    "       ssh-keygen -p [-f keyfile] [-m format] [-N new_passphrase]\n"
 	    "                   [-P old_passphrase]\n"
 	    "       ssh-keygen -i [-f input_keyfile] [-m key_format]\n"
@@ -2748,9 +2762,10 @@ main(int argc, char **argv)
 	int gen_all_hostkeys = 0, gen_krl = 0, update_krl = 0, check_krl = 0;
 	int prefer_agent = 0, convert_to = 0, convert_from = 0;
 	int print_public = 0, print_generic = 0, cert_serial_autoinc = 0;
-	unsigned long long cert_serial = 0;
+	unsigned long long ull, cert_serial = 0;
 	char *identity_comment = NULL, *ca_key_path = NULL;
 	u_int32_t bits = 0;
+	uint8_t sk_flags = SSH_SK_USER_PRESENCE_REQD;
 	FILE *f;
 	const char *errstr;
 	int log_level = SYSLOG_LEVEL_INFO;
@@ -2784,10 +2799,12 @@ main(int argc, char **argv)
 	if (gethostname(hostname, sizeof(hostname)) == -1)
 		fatal("gethostname: %s", strerror(errno));
 
-	/* Remaining characters: dw */
-	while ((opt = getopt(argc, argv, "ABHLQUXceghiklopquvxy"
+	sk_provider = getenv("SSH_SK_PROVIDER");
+
+	/* Remaining character: d */
+	while ((opt = getopt(argc, argv, "ABHLQUXceghiklopquvy"
 	    "C:D:E:F:G:I:J:K:M:N:O:P:R:S:T:V:W:Y:Z:"
-	    "a:b:f:g:j:m:n:r:s:t:z:")) != -1) {
+	    "a:b:f:g:j:m:n:r:s:t:w:x:z:")) != -1) {
 		switch (opt) {
 		case 'A':
 			gen_all_hostkeys = 1;
@@ -2887,7 +2904,6 @@ main(int argc, char **argv)
 			quiet = 1;
 			break;
 		case 'e':
-		case 'x':
 			/* export key */
 			convert_to = 1;
 			break;
@@ -2944,6 +2960,19 @@ main(int argc, char **argv)
 			break;
 		case 'Y':
 			sign_op = optarg;
+		case 'w':
+			sk_provider = optarg;
+			break;
+		case 'x':
+			if (*optarg == '\0')
+				fatal("Missing security key flags");
+			ull = strtoull(optarg, &ep, 0);
+			if (*ep != '\0')
+				fatal("Security key flags \"%s\" is not a "
+				    "number", optarg);
+			if (ull > 0xff)
+				fatal("Invalid security key flags 0x%llx", ull);
+			sk_flags = (uint8_t)ull;
 			break;
 		case 'z':
 			errno = 0;
@@ -3203,7 +3232,12 @@ main(int argc, char **argv)
 	if (!quiet)
 		printf("Generating public/private %s key pair.\n",
 		    key_type_name);
-	if ((r = sshkey_generate(type, bits, &private)) != 0)
+	if (type == KEY_ECDSA_SK) {
+		if (sshsk_enroll(sk_provider,
+		    cert_key_id == NULL ? "ssh:" : cert_key_id,
+		    sk_flags, NULL, &private, NULL) != 0)
+			exit(1); /* error message already printed */
+	} else if ((r = sshkey_generate(type, bits, &private)) != 0)
 		fatal("sshkey_generate failed");
 	if ((r = sshkey_from_private(private, &public)) != 0)
 		fatal("sshkey_from_private failed: %s\n", ssh_err(r));

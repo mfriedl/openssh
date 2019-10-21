@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile,v 1.32 2019/09/06 05:59:41 djm Exp $
+#	$OpenBSD: Makefile,v 1.34 2019/10/31 21:23:19 djm Exp $
 
 .PATH:		${.CURDIR}/..
 
 SRCS=	ssh-agent.c ${SRCS_PKCS11_CLIENT}
-SRCS+=	atomicio.c compat.c fatal.c readpass.c
+SRCS+=	atomicio.c compat.c fatal.c readpass.c msg.c
 SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} ${SRCS_KRL} ${SRCS_UTL}
 
 PROG=	ssh-agent
