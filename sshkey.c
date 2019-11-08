@@ -2695,6 +2695,10 @@ sshkey_verify(const struct sshkey *key,
 	case KEY_ED25519:
 	case KEY_ED25519_CERT:
 		return ssh_ed25519_verify(key, sig, siglen, data, dlen, compat);
+	case KEY_ED25519_SK:
+	case KEY_ED25519_SK_CERT:
+		return ssh_ed25519_sk_verify(key, sig, siglen, data, dlen,
+		    compat);
 #ifdef WITH_XMSS
 	case KEY_XMSS:
 	case KEY_XMSS_CERT:
