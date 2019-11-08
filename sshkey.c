@@ -2650,6 +2650,11 @@ sshkey_sign(struct sshkey *key,
 	case KEY_ED25519_CERT:
 		r = ssh_ed25519_sign(key, sigp, lenp, data, datalen, compat);
 		break;
+	case KEY_ED25519_SK:
+	case KEY_ED25519_SK_CERT:
+		r = sshsk_sign(sk_provider, key, sigp, lenp, data, datalen,
+		    compat);
+		break;
 #ifdef WITH_XMSS
 	case KEY_XMSS:
 	case KEY_XMSS_CERT:
