@@ -338,7 +338,7 @@ out:
 }
 
 int
-sshsk_ecdsa_sign(const char *provider_path, const struct sshkey *key,
+sshsk_sign(const char *provider_path, const struct sshkey *key,
     u_char **sigp, size_t *lenp, const u_char *data, size_t datalen,
     u_int compat)
 {

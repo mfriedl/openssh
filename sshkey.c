@@ -2638,8 +2638,8 @@ sshkey_sign(struct sshkey *key,
 		break;
 	case KEY_ECDSA_SK_CERT:
 	case KEY_ECDSA_SK:
-		r = sshsk_ecdsa_sign(sk_provider, key, sigp, lenp,
-		    data, datalen, compat);
+		r = sshsk_sign(sk_provider, key, sigp, lenp, data, datalen,
+		    compat);
 		break;
 	case KEY_RSA_CERT:
 	case KEY_RSA:
