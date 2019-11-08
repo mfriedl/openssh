@@ -607,7 +607,7 @@ process_add_identity(SocketEntry *e)
 		}
 	}
 	if (sk_provider != NULL) {
-		if (sshkey_type_plain(k->type) != KEY_ECDSA_SK) {
+		if (!sshkey_is_sk(k)) {
 			error("Cannot add provider: %s is not a security key",
 			    sshkey_type(k));
 			free(sk_provider);
