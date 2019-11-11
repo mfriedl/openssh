@@ -361,6 +361,12 @@ sshsk_ecdsa_inner_sig(struct sk_sign_response *resp, struct sshbuf **retp)
 	int r = SSH_ERR_INTERNAL_ERROR;
 
 	*retp = NULL;
+	/* Check response validity */
+	if (resp->sig_r == NULL || resp->sig_r == NULL) {
+		error("%s: sk_sign response invalid", __func__);
+		r = SSH_ERR_INVALID_FORMAT;
+		goto out;
+	}
 	if ((inner_sig = sshbuf_new()) == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
@@ -396,6 +402,12 @@ sshsk_ed25519_inner_sig(struct sk_sign_response *resp, struct sshbuf **retp)
 	int r = SSH_ERR_INTERNAL_ERROR;
 
 	*retp = NULL;
+	/* Check response validity */
+	if (resp->sig_r == NULL) {
+		error("%s: sk_sign response invalid", __func__);
+		r = SSH_ERR_INVALID_FORMAT;
+		goto out;
+	}
 	if ((inner_sig = sshbuf_new()) == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
