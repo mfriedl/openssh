@@ -1,4 +1,4 @@
-/* $OpenBSD: myproposal.h,v 1.60 2019/11/01 02:32:05 djm Exp $ */
+/* $OpenBSD: myproposal.h,v 1.61 2019/11/12 19:33:08 markus Exp $ */
 
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
