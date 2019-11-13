@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.311 2019/11/12 19:33:08 markus Exp $ */
+/* $OpenBSD: readconf.c,v 1.313 2019/11/13 05:42:26 deraadt Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
 #include <util.h>
@@ -1544,12 +1545,12 @@ parse_keytypes:
 				    "files",filename, linenum, arg2);
 				free(arg2);
 				continue;
-			} else if (r != 0 || gl.gl_pathc < 0)
+			} else if (r != 0)
 				fatal("%.200s line %d: glob failed for %s.",
 				    filename, linenum, arg2);
 			free(arg2);
 			oactive = *activep;
-			for (i = 0; i < (u_int)gl.gl_pathc; i++) {
+			for (i = 0; i < gl.gl_pathc; i++) {
 				debug3("%.200s line %d: Including file %s "
 				    "depth %d%s", filename, linenum,
 				    gl.gl_pathv[i], depth,
