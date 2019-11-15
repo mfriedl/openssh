@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-agent.c,v 1.242 2019/11/13 07:53:10 markus Exp $ */
+/* $OpenBSD: ssh-agent.c,v 1.246 2019/11/15 05:37:27 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -72,6 +72,7 @@
 #include "ssherr.h"
 #include "match.h"
 #include "msg.h"
+#include "ssherr.h"
 #include "pathnames.h"
 #include "ssh-pkcs11.h"
 #include "ssh-sk.h"
@@ -284,6 +285,23 @@ provider_sign(const char *provider, struct sshkey *key,
 	*sigp = NULL;
 	*lenp = 0;
 
+	if ((fp = sshkey_fingerprint(key, SSH_FP_HASH_DEFAULT,
+	    SSH_FP_DEFAULT)) == NULL)
+		fatal("%s: sshkey_fingerprint failed", __func__);
+	notifier = notify_start(0,
+	    "Confirm user presence for key %s %s", sshkey_type(key), fp);
+
+	if (strcasecmp(provider, "internal") == 0) {
+		r = sshsk_sign(provider, key, sigp, lenp,
+		    data, datalen, compat);
+		if (r != 0) {
+			error("%s: sshsk_sign internal: %s",
+			    __func__, ssh_err(r));
+		}
+		notify_complete(notifier);
+		return r;
+	}
+
 	helper = getenv("SSH_SK_HELPER");
 	if (helper == NULL || strlen(helper) == 0)
 		helper = _PATH_SSH_SK_HELPER;
@@ -330,17 +348,10 @@ provider_sign(const char *provider, struct sshkey *key,
 		error("%s: send: %s", __func__, ssh_err(r));
 		goto out;
 	}
-	if ((fp = sshkey_fingerprint(key, SSH_FP_HASH_DEFAULT,
-	    SSH_FP_DEFAULT)) == NULL)
-		fatal("%s: sshkey_fingerprint failed", __func__);
-	notifier = notify_start(0,
-	    "Confirm user presence for key %s %s", sshkey_type(key), fp);
 	if ((r = ssh_msg_recv(pair[0], resp)) != 0) {
 		error("%s: receive: %s", __func__, ssh_err(r));
 		goto out;
 	}
-	notify_complete(notifier);
-	notifier = NULL;
 	if ((r = sshbuf_get_u8(resp, &version)) != 0) {
 		error("%s: parse version: %s", __func__, ssh_err(r));
 		goto out;
@@ -398,7 +409,7 @@ process_sign_request2(SocketEntry *e)
 	u_char *signature = NULL;
 	size_t dlen, slen = 0;
 	u_int compat = 0, flags;
-	int r, ok = -1;
+	int was_shielded, r, r2, ok = -1;
 	struct sshbuf *msg;
 	struct sshkey *key = NULL;
 	struct identity *id;
@@ -421,9 +432,21 @@ process_sign_request2(SocketEntry *e)
 		goto send;
 	}
 	if (id->sk_provider != NULL) {
-		if ((r = provider_sign(id->sk_provider, id->key, &signature,
+		was_shielded = sshkey_is_shielded(id->key);
+		if ((r = sshkey_unshield_private(id->key)) != 0) {
+			error("%s: unshield: %s", __func__, ssh_err(r));
+			goto send;
+		}
+		r = provider_sign(id->sk_provider, id->key, &signature,
 		    &slen, data, dlen, agent_decode_alg(key, flags),
-		    compat)) != 0) {
+		    compat);
+		if (was_shielded &&
+		    (r2 = sshkey_shield_private(id->key)) != 0) {
+			error("%s: shield: %s", __func__, ssh_err(r));
+			r = r2;
+			goto send;
+		}
+		if (r != 0) {
 			error("%s: sign: %s", __func__, ssh_err(r));
 			goto send;
 		}
@@ -618,7 +641,9 @@ process_add_identity(SocketEntry *e)
 			free(sk_provider);
 			goto send;
 		}
-		if (match_pattern_list(sk_provider,
+		if (strcasecmp(sk_provider, "internal") == 0)
+			debug("%s: internal provider", __func__);
+		else if (match_pattern_list(sk_provider,
 		    provider_whitelist, 0) != 1) {
 			error("Refusing add key: provider %s not whitelisted",
 			    sk_provider);
