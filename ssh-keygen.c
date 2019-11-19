@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.364 2019/11/14 21:27:30 djm Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.369 2019/11/18 23:16:49 naddy Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
 #include <locale.h>
@@ -1780,9 +1781,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 		if ((r = sshkey_load_public(tmp, &public, &comment)) != 0)
 			fatal("%s: unable to open \"%s\": %s",
 			    __func__, tmp, ssh_err(r));
-		if (public->type != KEY_RSA && public->type != KEY_DSA &&
-		    public->type != KEY_ECDSA && public->type != KEY_ED25519 &&
-		    public->type != KEY_XMSS)
+		if (sshkey_is_cert(public))
 			fatal("%s: key \"%s\" type %s cannot be certified",
 			    __func__, tmp, sshkey_type(public));
 
@@ -1811,7 +1810,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 				fatal("Couldn't certify key %s via agent: %s",
 				    tmp, ssh_err(r));
 		} else {
-			if ((sshkey_certify(public, ca, key_type_name,
+			if ((r = sshkey_certify(public, ca, key_type_name,
 			    sk_provider)) != 0)
 				fatal("Couldn't certify key %s: %s",
 				    tmp, ssh_err(r));
@@ -2718,7 +2717,7 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile] [-m format]\n"
-	    "                  [-t dsa | ecdsa | ecdsa-sk | ed25519 | rsa]\n"
+	    "                  [-t dsa | ecdsa | ecdsa-sk | ed25519 | ed25519-sk | rsa]\n"
 	    "                  [-N new_passphrase] [-w provider] [-x flags]\n"
 	    "       ssh-keygen -p [-f keyfile] [-m format] [-N new_passphrase]\n"
 	    "                   [-P old_passphrase]\n"
@@ -2972,6 +2971,7 @@ main(int argc, char **argv)
 			break;
 		case 'Y':
 			sign_op = optarg;
+			break;
 		case 'w':
 			sk_provider = optarg;
 			break;
