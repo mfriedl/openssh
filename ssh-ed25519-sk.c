@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-ed25519.c,v 1.7 2016/04/21 06:08:02 djm Exp $ */
+/* $OpenBSD: ssh-ed25519-sk.c,v 1.4 2019/11/26 03:04:27 djm Exp $ */
 /*
  * Copyright (c) 2019 Markus Friedl.  All rights reserved.
  *
@@ -14,6 +14,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+/* #define DEBUG_SK 1 */
+
 #define SSHKEY_INTERNAL
 #include <sys/types.h>
 #include <limits.h>
@@ -33,7 +36,8 @@
 int
 ssh_ed25519_sk_verify(const struct sshkey *key,
     const u_char *signature, size_t signaturelen,
-    const u_char *data, size_t datalen, u_int compat)
+    const u_char *data, size_t datalen, u_int compat,
+    struct sshkey_sig_details **detailsp)
 {
 	struct sshbuf *b = NULL;
 	struct sshbuf *encoded = NULL;
@@ -49,6 +53,10 @@ ssh_ed25519_sk_verify(const struct sshkey *key,
 	unsigned long long smlen = 0, mlen = 0;
 	int r = SSH_ERR_INTERNAL_ERROR;
 	int ret;
+	struct sshkey_sig_details *details = NULL;
+
+	if (detailsp != NULL)
+		*detailsp = NULL;
 
 	if (key == NULL ||
 	    sshkey_type_plain(key->type) != KEY_ED25519_SK ||
@@ -65,6 +73,14 @@ ssh_ed25519_sk_verify(const struct sshkey *key,
 		r = SSH_ERR_INVALID_FORMAT;
 		goto out;
 	}
+#ifdef DEBUG_SK
+	fprintf(stderr, "%s: data:\n", __func__);
+	/* sshbuf_dump_data(data, datalen, stderr); */
+	fprintf(stderr, "%s: sigblob:\n", __func__);
+	sshbuf_dump_data(sigblob, len, stderr);
+	fprintf(stderr, "%s: sig_flags = 0x%02x, sig_counter = %u\n",
+	    __func__, sig_flags, sig_counter);
+#endif
 	if (strcmp(sshkey_ssh_name_plain(key), ktype) != 0) {
 		r = SSH_ERR_KEY_TYPE_MISMATCH;
 		goto out;
@@ -84,6 +100,18 @@ ssh_ed25519_sk_verify(const struct sshkey *key,
 		r = SSH_ERR_INVALID_ARGUMENT;
 		goto out;
 	}
+#ifdef DEBUG_SK
+	fprintf(stderr, "%s: hashed application:\n", __func__);
+	sshbuf_dump_data(apphash, sizeof(apphash), stderr);
+	fprintf(stderr, "%s: hashed message:\n", __func__);
+	sshbuf_dump_data(msghash, sizeof(msghash), stderr);
+#endif
+	if ((details = calloc(1, sizeof(*details))) == NULL) {
+		r = SSH_ERR_ALLOC_FAIL;
+		goto out;
+	}
+	details->sk_counter = sig_counter;
+	details->sk_flags = sig_flags;
 	if ((encoded = sshbuf_new()) == NULL) {
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
@@ -96,6 +124,10 @@ ssh_ed25519_sk_verify(const struct sshkey *key,
 		r = SSH_ERR_ALLOC_FAIL;
 		goto out;
 	}
+#ifdef DEBUG_SK
+	fprintf(stderr, "%s: signed buf:\n", __func__);
+	sshbuf_dump(encoded, stderr);
+#endif
 	sm = sshbuf_ptr(encoded);
 	smlen = sshbuf_len(encoded);
 	mlen = smlen;
@@ -115,11 +147,16 @@ ssh_ed25519_sk_verify(const struct sshkey *key,
 	/* XXX compare 'm' and 'sm + len' ? */
 	/* success */
 	r = 0;
+	if (detailsp != NULL) {
+		*detailsp = details;
+		details = NULL;
+	}
  out:
 	if (m != NULL) {
 		explicit_bzero(m, smlen); /* NB mlen may be invalid if r != 0 */
 		free(m);
 	}
+	sshkey_sig_details_free(details);
 	sshbuf_free(b);
 	sshbuf_free(encoded);
 	free(ktype);

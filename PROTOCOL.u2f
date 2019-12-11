@@ -86,7 +86,7 @@ With a private half consisting of:
 	string		"sk-ssh-ed25519@openssh.com"
 	string		public key
 	string		application (user-specified, but typically "ssh:")
-	uint32		flags
+	uint8		flags
 	string		key_handle
 	string		reserved
 
@@ -110,6 +110,8 @@ information to the public key:
 	string		signature key
 	string		signature
 
+and for security key ed25519 certificates:
+
 	string		"sk-ssh-ed25519-cert-v01@openssh.com"
 	string		nonce
 	string		public key
@@ -125,6 +127,15 @@ information to the public key:
 	string		reserved
 	string		signature key
 	string		signature
+
+Both security key certificates use the following encoding for private keys:
+
+	string		type (e.g. "sk-ssh-ed25519-cert-v01@openssh.com")
+	string		pubkey (the above key/cert structure)
+	string		application
+	uint8		flags
+	string		key_handle
+	string		reserved
 
 During key generation, the hardware also returns attestation information
 that may be used to cryptographically prove that a given key is
@@ -149,16 +160,9 @@ following format:
 SSH U2F signatures
 ------------------
 
-In addition to the message to be signed, the U2F signature operation 
-requires a few additional parameters:
-
-	byte		control bits (e.g. "user presence required" flag)
-	byte[32]	SHA256(message)
-	byte[32]	SHA256(application)
-	byte		key_handle length
-	byte[]		key_handle
-
-This signature is signed over a blob that consists of:
+In addition to the message to be signed, the U2F signature operation
+requires the key handle and a few additional parameters. The signature
+is signed over a blob that consists of:
 
 	byte[32]	SHA256(application)
 	byte		flags (including "user present", extensions present)
@@ -166,11 +170,15 @@ This signature is signed over a blob that consists of:
 	byte[]		extensions
 	byte[32]	SHA256(message)
 
+No extensons are yet defined for SSH use. If any are defined in the future,
+it will be possible to infer their presence from the contents of the "flags"
+value.
+
 The signature returned from U2F hardware takes the following format:
 
 	byte		flags (including "user present")
 	uint32		counter
-	byte[32]	ecdsa_signature (in X9.62 format).
+	byte[]		ecdsa_signature (in X9.62 format).
 
 For use in the SSH protocol, we wish to avoid server-side parsing of ASN.1
 format data in the pre-authentication attack surface. Therefore, the
@@ -195,7 +203,6 @@ For Ed25519 keys the signature is encoded as:
 	byte		flags
 	uint32		counter
 
-
 ssh-agent protocol extensions
 -----------------------------
 
@@ -212,7 +219,7 @@ with a new key constraint extension to encode a path to the middleware
 library for the key. The format of this constraint extension would be:
 
 	byte		SSH_AGENT_CONSTRAIN_EXTENSION
-	string		sk@openssh.com
+	string		sk-provider@openssh.com
 	string		middleware path
 
 This constraint-based approach does not present any compatibility
@@ -271,7 +278,7 @@ The middleware library need only expose a handful of functions:
 	    const uint8_t *key_handle, size_t key_handle_len,
 	    uint8_t flags, struct sk_sign_response **sign_response);
 
-In OpenSSH, these will be invoked by generalising the existing
-ssh-pkcs11-helper mechanism to provide containment of the middleware from
-ssh-agent.
+In OpenSSH, these will be invoked by using a similar mechanism to
+ssh-pkcs11-helper to provide address-space containment of the
+middleware from ssh-agent.
 

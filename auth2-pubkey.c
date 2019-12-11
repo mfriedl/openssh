@@ -1,4 +1,4 @@
-/* $OpenBSD: auth2-pubkey.c,v 1.94 2019/09/06 04:53:27 djm Exp $ */
+/* $OpenBSD: auth2-pubkey.c,v 1.97 2019/11/25 00:54:23 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
@@ -65,6 +65,7 @@
 #include "ssherr.h"
 #include "channels.h" /* XXX for session.h */
 #include "session.h" /* XXX for child_set_env(); refactor? */
+#include "sk-api.h"
 
 /* import */
 extern ServerOptions options;
@@ -93,8 +94,9 @@ userauth_pubkey(struct ssh *ssh)
 	u_char *pkblob = NULL, *sig = NULL, have_sig;
 	size_t blen, slen;
 	int r, pktype;
-	int authenticated = 0;
+	int req_presence = 0, authenticated = 0;
 	struct sshauthopt *authopts = NULL;
+	struct sshkey_sig_details *sig_details = NULL;
 
 	if ((r = sshpkt_get_u8(ssh, &have_sig)) != 0 ||
 	    (r = sshpkt_get_cstring(ssh, &pkalg, NULL)) != 0 ||
@@ -210,8 +212,29 @@ userauth_pubkey(struct ssh *ssh)
 		    PRIVSEP(sshkey_verify(key, sig, slen,
 		    sshbuf_ptr(b), sshbuf_len(b),
 		    (ssh->compat & SSH_BUG_SIGTYPE) == 0 ? pkalg : NULL,
-		    ssh->compat)) == 0) {
+		    ssh->compat, &sig_details)) == 0) {
 			authenticated = 1;
+		}
+		if (authenticated == 1 && sig_details != NULL) {
+			auth2_record_info(authctxt, "signature count = %u",
+			    sig_details->sk_counter);
+			debug("%s: sk_counter = %u, sk_flags = 0x%02x",
+			    __func__, sig_details->sk_counter,
+			    sig_details->sk_flags);
+			req_presence = (options.pubkey_auth_options &
+			    PUBKEYAUTH_TOUCH_REQUIRED) ||
+			    !authopts->no_require_user_presence;
+			if (req_presence && (sig_details->sk_flags &
+			    SSH_SK_USER_PRESENCE_REQD) == 0) {
+				error("public key %s signature for %s%s from "
+				    "%.128s port %d rejected: user presence "
+				    "(key touch) requirement not met ", key_s,
+				    authctxt->valid ? "" : "invalid user ",
+				    authctxt->user, ssh_remote_ipaddr(ssh),
+				    ssh_remote_port(ssh));
+				authenticated = 0;
+				goto done;
+			}
 		}
 		auth2_record_key(authctxt, authenticated, key);
 	} else {
@@ -263,6 +286,7 @@ done:
 	free(key_s);
 	free(ca_s);
 	free(sig);
+	sshkey_sig_details_free(sig_details);
 	return authenticated;
 }
 

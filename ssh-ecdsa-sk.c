@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-ecdsa-sk.c,v 1.2 2019/11/19 22:23:19 djm Exp $ */
+/* $OpenBSD: ssh-ecdsa-sk.c,v 1.5 2019/11/26 03:04:27 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2010 Damien Miller.  All rights reserved.
@@ -47,7 +47,8 @@
 int
 ssh_ecdsa_sk_verify(const struct sshkey *key,
     const u_char *signature, size_t signaturelen,
-    const u_char *data, size_t datalen, u_int compat)
+    const u_char *data, size_t datalen, u_int compat,
+    struct sshkey_sig_details **detailsp)
 {
 	ECDSA_SIG *sig = NULL;
 	BIGNUM *sig_r = NULL, *sig_s = NULL;
@@ -57,10 +58,13 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 	int ret = SSH_ERR_INTERNAL_ERROR;
 	struct sshbuf *b = NULL, *sigbuf = NULL, *original_signed = NULL;
 	char *ktype = NULL;
+	struct sshkey_sig_details *details = NULL;
 #ifdef DEBUG_SK
 	char *tmp = NULL;
 #endif
 
+	if (detailsp != NULL)
+		*detailsp = NULL;
 	if (key == NULL || key->ecdsa == NULL ||
 	    sshkey_type_plain(key->type) != KEY_ECDSA_SK ||
 	    signature == NULL || signaturelen == 0)
@@ -103,6 +107,8 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 		goto out;
 	}
 #ifdef DEBUG_SK
+	fprintf(stderr, "%s: data: (len %zu)\n", __func__, datalen);
+	/* sshbuf_dump_data(data, datalen, stderr); */
 	fprintf(stderr, "%s: sig_r: %s\n", __func__, (tmp = BN_bn2hex(sig_r)));
 	free(tmp);
 	fprintf(stderr, "%s: sig_s: %s\n", __func__, (tmp = BN_bn2hex(sig_s)));
@@ -118,8 +124,10 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 	}
 
 	/* Reconstruct data that was supposedly signed */
-	if ((original_signed = sshbuf_new()) == NULL)
-		return SSH_ERR_ALLOC_FAIL;
+	if ((original_signed = sshbuf_new()) == NULL) {
+		ret = SSH_ERR_ALLOC_FAIL;
+		goto out;
+	}
 	if ((ret = ssh_digest_memory(SSH_DIGEST_SHA256, data, datalen,
 	    msghash, sizeof(msghash))) != 0)
 		goto out;
@@ -128,6 +136,8 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 	    strlen(key->sk_application), apphash, sizeof(apphash))) != 0)
 		goto out;
 #ifdef DEBUG_SK
+	fprintf(stderr, "%s: hashed application:\n", __func__);
+	sshbuf_dump_data(apphash, sizeof(apphash), stderr);
 	fprintf(stderr, "%s: hashed message:\n", __func__);
 	sshbuf_dump_data(msghash, sizeof(msghash), stderr);
 #endif
@@ -141,6 +151,12 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 	if ((ret = ssh_digest_buffer(SSH_DIGEST_SHA256, original_signed,
 	    sighash, sizeof(sighash))) != 0)
 		goto out;
+	if ((details = calloc(1, sizeof(*details))) == NULL) {
+		ret = SSH_ERR_ALLOC_FAIL;
+		goto out;
+	}
+	details->sk_counter = sig_counter;
+	details->sk_flags = sig_flags;
 #ifdef DEBUG_SK
 	fprintf(stderr, "%s: signed buf:\n", __func__);
 	sshbuf_dump(original_signed, stderr);
@@ -160,13 +176,18 @@ ssh_ecdsa_sk_verify(const struct sshkey *key,
 		ret = SSH_ERR_LIBCRYPTO_ERROR;
 		goto out;
 	}
-
+	/* success */
+	if (detailsp != NULL) {
+		*detailsp = details;
+		details = NULL;
+	}
  out:
 	explicit_bzero(&sig_flags, sizeof(sig_flags));
 	explicit_bzero(&sig_counter, sizeof(sig_counter));
 	explicit_bzero(msghash, sizeof(msghash));
 	explicit_bzero(sighash, sizeof(msghash));
 	explicit_bzero(apphash, sizeof(apphash));
+	sshkey_sig_details_free(details);
 	sshbuf_free(original_signed);
 	sshbuf_free(sigbuf);
 	sshbuf_free(b);
