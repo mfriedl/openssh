@@ -37,7 +37,7 @@ hardware, thus requiring little on-device storage for an effectively
 unlimited number of supported keys. This drives the requirement that
 the key handle be supplied for each signature operation. U2F tokens
 primarily use ECDSA signatures in the NIST-P256 field, though the FIDO2
-standard specified additional key types include one based on Ed25519.
+standard specifies additional key types, including one based on Ed25519.
 
 SSH U2F Key formats
 -------------------
@@ -48,10 +48,6 @@ OpenSSH integrates U2F as new key and corresponding certificate types:
 	sk-ecdsa-sha2-nistp256-cert-v01@openssh.com
 	sk-ssh-ed25519@openssh.com
 	sk-ssh-ed25519-cert-v01@openssh.com
-
-These key types are supported only for user authentication with the
-"publickey" method. They are not used for host-based user authentication
-or server host key authentication.
 
 While each uses ecdsa-sha256-nistp256 as the underlying signature primitive,
 keys require extra information in the public and private keys, and in
@@ -237,8 +233,13 @@ support for the common case of USB HID security keys internally.
 
 The middleware library need only expose a handful of functions:
 
+	#define SSH_SK_VERSION_MAJOR		0x00030000 /* API version */
+	#define SSH_SK_VERSION_MAJOR_MASK	0xffff0000
+
 	/* Flags */
 	#define SSH_SK_USER_PRESENCE_REQD	0x01
+	#define SSH_SK_USER_VERIFICATION_REQD	0x04
+	#define SSH_SK_RESIDENT_KEY		0x20
 
 	/* Algs */
 	#define SSH_SK_ECDSA                   0x00
@@ -264,19 +265,34 @@ The middleware library need only expose a handful of functions:
 		size_t sig_s_len;
 	};
 
+	struct sk_resident_key {
+		uint8_t alg;
+		size_t slot;
+		char *application;
+		struct sk_enroll_response key;
+	};
+
 	/* Return the version of the middleware API */
 	uint32_t sk_api_version(void);
 
 	/* Enroll a U2F key (private key generation) */
 	int sk_enroll(int alg, const uint8_t *challenge, size_t challenge_len,
-	    const char *application, uint8_t flags,
+	    const char *application, uint8_t flags, const char *pin,
 	    struct sk_enroll_response **enroll_response);
 
 	/* Sign a challenge */
 	int sk_sign(int alg, const uint8_t *message, size_t message_len,
 	    const char *application,
 	    const uint8_t *key_handle, size_t key_handle_len,
-	    uint8_t flags, struct sk_sign_response **sign_response);
+	    uint8_t flags, const char *pin,
+	    struct sk_sign_response **sign_response);
+
+	/* Enumerate all resident keys */
+	int sk_load_resident_keys(const char *pin,
+	    struct sk_resident_key ***rks, size_t *nrks);
+
+The SSH_SK_VERSION_MAJOR should be incremented for each incompatible
+API change.
 
 In OpenSSH, these will be invoked by using a similar mechanism to
 ssh-pkcs11-helper to provide address-space containment of the
