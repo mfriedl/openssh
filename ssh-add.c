@@ -542,7 +542,8 @@ load_resident_keys(int agent_fd, const char *skprovider, int qflag)
 	char *fp;
 
 	pass = read_passphrase("Enter PIN for security key: ", RP_ALLOW_STDIN);
-	if ((r = sshsk_load_resident(skprovider, pass, &keys, &nkeys)) != 0) {
+	if ((r = sshsk_load_resident(skprovider, NULL, pass,
+	    &keys, &nkeys)) != 0) {
 		error("Unable to load resident keys: %s", ssh_err(r));
 		return r;
 	}

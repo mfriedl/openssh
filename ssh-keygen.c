@@ -2897,7 +2897,7 @@ skip_ssh_url_preamble(const char *s)
 }
 
 static int
-do_download_sk(const char *skprovider)
+do_download_sk(const char *skprovider, const char *device)
 {
 	struct sshkey **keys;
 	size_t nkeys, i;
@@ -2909,7 +2909,8 @@ do_download_sk(const char *skprovider)
 		fatal("Cannot download keys without provider");
 
 	pin = read_passphrase("Enter PIN for security key: ", RP_ALLOW_STDIN);
-	if ((r = sshsk_load_resident(skprovider, pin, &keys, &nkeys)) != 0) {
+	if ((r = sshsk_load_resident(skprovider, device, pin,
+	    &keys, &nkeys)) != 0) {
 		freezero(pin, strlen(pin));
 		error("Unable to load resident keys: %s", ssh_err(r));
 		return -1;
@@ -3049,6 +3050,7 @@ main(int argc, char **argv)
 	int do_gen_candidates = 0, do_screen_candidates = 0, download_sk = 0;
 	unsigned long long cert_serial = 0;
 	char *identity_comment = NULL, *ca_key_path = NULL, **opts = NULL;
+	char *sk_device = NULL, *sk_user = NULL;
 	size_t i, nopts = 0;
 	u_int32_t bits = 0;
 	uint8_t sk_flags = SSH_SK_USER_PRESENCE_REQD;
@@ -3375,8 +3377,17 @@ main(int argc, char **argv)
 	}
 	if (pkcs11provider != NULL)
 		do_download(pw);
-	if (download_sk)
-		return do_download_sk(sk_provider);
+	if (download_sk) {
+		for (i = 0; i < nopts; i++) {
+			if (strncasecmp(opts[i], "device=", 7) == 0) {
+				sk_device = xstrdup(opts[i] + 7);
+			} else {
+				fatal("Option \"%s\" is unsupported for "
+				    "FIDO authenticator download", opts[i]);
+			}
+		}
+		return do_download_sk(sk_provider, sk_device);
+	}
 	if (print_fingerprint || print_bubblebabble)
 		do_fingerprint(pw);
 	if (change_passphrase)
@@ -3463,6 +3474,10 @@ main(int argc, char **argv)
 				sk_flags &= ~SSH_SK_USER_PRESENCE_REQD;
 			} else if (strcasecmp(opts[i], "resident") == 0) {
 				sk_flags |= SSH_SK_RESIDENT_KEY;
+			} else if (strncasecmp(opts[i], "device=", 7) == 0) {
+				sk_device = xstrdup(opts[i] + 7);
+			} else if (strncasecmp(opts[i], "user=", 5) == 0) {
+				sk_user = xstrdup(opts[i] + 5);
 			} else {
 				fatal("Option \"%s\" is unsupported for "
 				    "FIDO authenticator enrollment", opts[i]);
@@ -3479,9 +3494,10 @@ main(int argc, char **argv)
 				    "key to authorize key generation.\n");
 			}
 			fflush(stdout);
-			r = sshsk_enroll(type, sk_provider,
+			r = sshsk_enroll(type, sk_provider, sk_device,
 			    cert_key_id == NULL ? "ssh:" : cert_key_id,
-			    sk_flags, passphrase, NULL, &private, NULL);
+			    sk_user, sk_flags, passphrase, NULL,
+			    &private, NULL);
 			if (r == 0)
 				break;
 			if (r != SSH_ERR_KEY_WRONG_PASSPHRASE)
