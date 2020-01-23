@@ -1,5 +1,5 @@
 
-/* $OpenBSD: servconf.c,v 1.357 2019/12/15 20:59:23 djm Exp $ */
+/* $OpenBSD: servconf.c,v 1.359 2020/01/23 10:24:29 dtucker Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
@@ -181,6 +181,7 @@ static void
 assemble_algorithms(ServerOptions *o)
 {
 	char *all_cipher, *all_mac, *all_kex, *all_key, *all_sig;
+	char *def_cipher, *def_mac, *def_kex, *def_key, *def_sig;
 	int r;
 
 	all_cipher = cipher_alg_list(',', 0);
@@ -188,24 +189,35 @@ assemble_algorithms(ServerOptions *o)
 	all_kex = kex_alg_list(',');
 	all_key = sshkey_alg_list(0, 0, 1, ',');
 	all_sig = sshkey_alg_list(0, 1, 1, ',');
+	/* remove unsupported algos from default lists */
+	def_cipher = match_filter_whitelist(KEX_SERVER_ENCRYPT, all_cipher);
+	def_mac = match_filter_whitelist(KEX_SERVER_MAC, all_mac);
+	def_kex = match_filter_whitelist(KEX_SERVER_KEX, all_kex);
+	def_key = match_filter_whitelist(KEX_DEFAULT_PK_ALG, all_key);
+	def_sig = match_filter_whitelist(SSH_ALLOWED_CA_SIGALGS, all_sig);
 #define ASSEMBLE(what, defaults, all) \
 	do { \
 		if ((r = kex_assemble_names(&o->what, defaults, all)) != 0) \
 			fatal("%s: %s: %s", __func__, #what, ssh_err(r)); \
 	} while (0)
-	ASSEMBLE(ciphers, KEX_SERVER_ENCRYPT, all_cipher);
-	ASSEMBLE(macs, KEX_SERVER_MAC, all_mac);
-	ASSEMBLE(kex_algorithms, KEX_SERVER_KEX, all_kex);
-	ASSEMBLE(hostkeyalgorithms, KEX_DEFAULT_PK_ALG, all_key);
-	ASSEMBLE(hostbased_key_types, KEX_DEFAULT_PK_ALG, all_key);
-	ASSEMBLE(pubkey_key_types, KEX_DEFAULT_PK_ALG, all_key);
-	ASSEMBLE(ca_sign_algorithms, SSH_ALLOWED_CA_SIGALGS, all_sig);
+	ASSEMBLE(ciphers, def_cipher, all_cipher);
+	ASSEMBLE(macs, def_mac, all_mac);
+	ASSEMBLE(kex_algorithms, def_kex, all_kex);
+	ASSEMBLE(hostkeyalgorithms, def_key, all_key);
+	ASSEMBLE(hostbased_key_types, def_key, all_key);
+	ASSEMBLE(pubkey_key_types, def_key, all_key);
+	ASSEMBLE(ca_sign_algorithms, def_sig, all_sig);
 #undef ASSEMBLE
 	free(all_cipher);
 	free(all_mac);
 	free(all_kex);
 	free(all_key);
 	free(all_sig);
+	free(def_cipher);
+	free(def_mac);
+	free(def_kex);
+	free(def_key);
+	free(def_sig);
 }
 
 static void
@@ -351,7 +363,12 @@ fill_default_server_options(ServerOptions *options)
 		options->permit_user_env_whitelist = NULL;
 	}
 	if (options->compression == -1)
+#ifdef WITH_ZLIB
 		options->compression = COMP_DELAYED;
+#else
+		options->compression = COMP_NONE;
+#endif
+
 	if (options->rekey_limit == -1)
 		options->rekey_limit = 0;
 	if (options->rekey_interval == -1)
@@ -1144,8 +1161,10 @@ static const struct multistate multistate_permitrootlogin[] = {
 	{ NULL, -1 }
 };
 static const struct multistate multistate_compression[] = {
+#ifdef WITH_ZLIB
 	{ "yes",			COMP_DELAYED },
 	{ "delayed",			COMP_DELAYED },
+#endif
 	{ "no",				COMP_NONE },
 	{ NULL, -1 }
 };
@@ -2590,8 +2609,8 @@ dump_config(ServerOptions *o)
 	/* string arguments */
 	dump_cfg_string(sPidFile, o->pid_file);
 	dump_cfg_string(sXAuthLocation, o->xauth_location);
-	dump_cfg_string(sCiphers, o->ciphers ? o->ciphers : KEX_SERVER_ENCRYPT);
-	dump_cfg_string(sMacs, o->macs ? o->macs : KEX_SERVER_MAC);
+	dump_cfg_string(sCiphers, o->ciphers);
+	dump_cfg_string(sMacs, o->macs);
 	dump_cfg_string(sBanner, o->banner);
 	dump_cfg_string(sForceCommand, o->adm_forced_command);
 	dump_cfg_string(sChrootDirectory, o->chroot_directory);
@@ -2607,16 +2626,11 @@ dump_config(ServerOptions *o)
 	dump_cfg_string(sAuthorizedPrincipalsCommand, o->authorized_principals_command);
 	dump_cfg_string(sAuthorizedPrincipalsCommandUser, o->authorized_principals_command_user);
 	dump_cfg_string(sHostKeyAgent, o->host_key_agent);
-	dump_cfg_string(sKexAlgorithms,
-	    o->kex_algorithms ? o->kex_algorithms : KEX_SERVER_KEX);
-	dump_cfg_string(sCASignatureAlgorithms, o->ca_sign_algorithms ?
-	    o->ca_sign_algorithms : SSH_ALLOWED_CA_SIGALGS);
-	dump_cfg_string(sHostbasedAcceptedKeyTypes, o->hostbased_key_types ?
-	    o->hostbased_key_types : KEX_DEFAULT_PK_ALG);
-	dump_cfg_string(sHostKeyAlgorithms, o->hostkeyalgorithms ?
-	    o->hostkeyalgorithms : KEX_DEFAULT_PK_ALG);
-	dump_cfg_string(sPubkeyAcceptedKeyTypes, o->pubkey_key_types ?
-	    o->pubkey_key_types : KEX_DEFAULT_PK_ALG);
+	dump_cfg_string(sKexAlgorithms, o->kex_algorithms);
+	dump_cfg_string(sCASignatureAlgorithms, o->ca_sign_algorithms);
+	dump_cfg_string(sHostbasedAcceptedKeyTypes, o->hostbased_key_types);
+	dump_cfg_string(sHostKeyAlgorithms, o->hostkeyalgorithms);
+	dump_cfg_string(sPubkeyAcceptedKeyTypes, o->pubkey_key_types);
 	dump_cfg_string(sRDomain, o->routing_domain);
 
 	/* string arguments requiring a lookup */

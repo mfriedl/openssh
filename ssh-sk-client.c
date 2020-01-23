@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-sk-client.c,v 1.5 2020/01/10 23:43:26 djm Exp $ */
+/* $OpenBSD: ssh-sk-client.c,v 1.7 2020/01/23 07:10:22 dtucker Exp $ */
 /*
  * Copyright (c) 2019 Google LLC
  *
@@ -19,6 +19,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 
+#include <fcntl.h>
 #include <limits.h>
 #include <errno.h>
 #include <signal.h>
@@ -36,6 +37,7 @@
 #include "digest.h"
 #include "pathnames.h"
 #include "ssh-sk.h"
+#include "misc.h"
 
 /* #define DEBUG_SK 1 */
 
@@ -54,6 +56,13 @@ start_helper(int *fdp, pid_t *pidp, void (**osigchldp)(int))
 	helper = getenv("SSH_SK_HELPER");
 	if (helper == NULL || strlen(helper) == 0)
 		helper = _PATH_SSH_SK_HELPER;
+	if (access(helper, X_OK) != 0) {
+		oerrno = errno;
+		error("%s: helper \"%s\" unusable: %s", __func__, helper,
+		    strerror(errno));
+		errno = oerrno;
+		return SSH_ERR_SYSTEM_ERROR;
+	}
 #ifdef DEBUG_SK
 	verbosity = "-vvv";
 #endif
@@ -63,13 +72,13 @@ start_helper(int *fdp, pid_t *pidp, void (**osigchldp)(int))
 		error("socketpair: %s", strerror(errno));
 		return SSH_ERR_SYSTEM_ERROR;
 	}
-	osigchld = signal(SIGCHLD, SIG_DFL);
+	osigchld = ssh_signal(SIGCHLD, SIG_DFL);
 	if ((pid = fork()) == -1) {
 		oerrno = errno;
 		error("fork: %s", strerror(errno));
 		close(pair[0]);
 		close(pair[1]);
-		signal(SIGCHLD, osigchld);
+		ssh_signal(SIGCHLD, osigchld);
 		errno = oerrno;
 		return SSH_ERR_SYSTEM_ERROR;
 	}
@@ -210,7 +219,7 @@ client_converse(struct sshbuf *msg, struct sshbuf **respp, u_int type)
 	}
 	sshbuf_free(req);
 	sshbuf_free(resp);
-	signal(SIGCHLD, osigchld);
+	ssh_signal(SIGCHLD, osigchld);
 	errno = oerrno;
 	return r;
 

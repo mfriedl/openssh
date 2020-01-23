@@ -677,56 +677,116 @@ sshsigopt_free(struct sshsigopt *opts)
 }
 
 static int
-check_allowed_keys_line(const char *path, u_long linenum, char *line,
-    const struct sshkey *sign_key, const char *principal,
-    const char *sig_namespace)
+parse_principals_key_and_options(const char *path, u_long linenum, char *line,
+    const char *required_principal, char **principalsp, struct sshkey **keyp,
+    struct sshsigopt **sigoptsp)
 {
-	struct sshkey *found_key = NULL;
-	char *cp, *opts = NULL, *identities = NULL;
-	int r, found = 0;
+	char *opts = NULL, *tmp, *cp, *principals = NULL;
 	const char *reason = NULL;
 	struct sshsigopt *sigopts = NULL;
+	struct sshkey *key = NULL;
+	int r = SSH_ERR_INTERNAL_ERROR;
 
-	if ((found_key = sshkey_new(KEY_UNSPEC)) == NULL) {
-		error("%s: sshkey_new failed", __func__);
-		return SSH_ERR_ALLOC_FAIL;
-	}
+	if (principalsp != NULL)
+		*principalsp = NULL;
+	if (sigoptsp != NULL)
+		*sigoptsp = NULL;
+	if (keyp != NULL)
+		*keyp = NULL;
 
-	/* format: identity[,identity...] [option[,option...]] key */
 	cp = line;
 	cp = cp + strspn(cp, " \t"); /* skip leading whitespace */
 	if (*cp == '#' || *cp == '\0')
-		goto done;
-	if ((identities = strdelimw(&cp)) == NULL) {
-		error("%s:%lu: invalid line", path, linenum);
-		goto done;
-	}
-	if (match_pattern_list(principal, identities, 0) != 1) {
-		/* principal didn't match */
-		goto done;
-	}
-	debug("%s: %s:%lu: matched principal \"%s\"",
-	    __func__, path, linenum, principal);
+		return SSH_ERR_KEY_NOT_FOUND; /* blank or all-comment line */
 
-	if (sshkey_read(found_key, &cp) != 0) {
+	/* format: identity[,identity...] [option[,option...]] key */
+	if ((tmp = strdelimw(&cp)) == NULL) {
+		error("%s:%lu: invalid line", path, linenum);
+		r = SSH_ERR_INVALID_FORMAT;
+		goto out;
+	}
+	if ((principals = strdup(tmp)) == NULL) {
+		error("%s: strdup failed", __func__);
+		r = SSH_ERR_ALLOC_FAIL;
+		goto out;
+	}
+	/*
+	 * Bail out early if we're looking for a particular principal and this
+	 * line does not list it.
+	 */
+	if (required_principal != NULL) {
+		if (match_pattern_list(required_principal,
+		    principals, 0) != 1) {
+			/* principal didn't match */
+			r = SSH_ERR_KEY_NOT_FOUND;
+			goto out;
+		}
+		debug("%s: %s:%lu: matched principal \"%s\"",
+		    __func__, path, linenum, required_principal);
+	}
+
+	if ((key = sshkey_new(KEY_UNSPEC)) == NULL) {
+		error("%s: sshkey_new failed", __func__);
+		r = SSH_ERR_ALLOC_FAIL;
+		goto out;
+	}
+	if (sshkey_read(key, &cp) != 0) {
 		/* no key? Check for options */
 		opts = cp;
 		if (sshkey_advance_past_options(&cp) != 0) {
-			error("%s:%lu: invalid options",
-			    path, linenum);
-			goto done;
+			error("%s:%lu: invalid options", path, linenum);
+			r = SSH_ERR_INVALID_FORMAT;
+			goto out;
 		}
 		*cp++ = '\0';
 		skip_space(&cp);
-		if (sshkey_read(found_key, &cp) != 0) {
-			error("%s:%lu: invalid key", path,
-			    linenum);
-			goto done;
+		if (sshkey_read(key, &cp) != 0) {
+			error("%s:%lu: invalid key", path, linenum);
+			r = SSH_ERR_INVALID_FORMAT;
+			goto out;
 		}
 	}
 	debug3("%s:%lu: options %s", path, linenum, opts == NULL ? "" : opts);
 	if ((sigopts = sshsigopt_parse(opts, path, linenum, &reason)) == NULL) {
 		error("%s:%lu: bad options: %s", path, linenum, reason);
+		r = SSH_ERR_INVALID_FORMAT;
+		goto out;
+	}
+	/* success */
+	if (principalsp != NULL) {
+		*principalsp = principals;
+		principals = NULL; /* transferred */
+	}
+	if (sigoptsp != NULL) {
+		*sigoptsp = sigopts;
+		sigopts = NULL; /* transferred */
+	}
+	if (keyp != NULL) {
+		*keyp = key;
+		key = NULL; /* transferred */
+	}
+	r = 0;
+ out:
+	free(principals);
+	sshsigopt_free(sigopts);
+	sshkey_free(key);
+	return r;
+}
+
+static int
+check_allowed_keys_line(const char *path, u_long linenum, char *line,
+    const struct sshkey *sign_key, const char *principal,
+    const char *sig_namespace)
+{
+	struct sshkey *found_key = NULL;
+	int r, found = 0;
+	const char *reason = NULL;
+	struct sshsigopt *sigopts = NULL;
+
+	/* Parse the line */
+	if ((r = parse_principals_key_and_options(path, linenum, line,
+	    principal, NULL, &found_key, &sigopts)) != 0) {
+		/* error already logged */
 		goto done;
 	}
 
@@ -803,4 +863,121 @@ sshsig_check_allowed_keys(const char *path, const struct sshkey *sign_key,
 	fclose(f);
 	free(line);
 	return r == 0 ? SSH_ERR_KEY_NOT_FOUND : r;
+}
+
+static int
+get_matching_principal_from_line(const char *path, u_long linenum, char *line,
+    const struct sshkey *sign_key, char **principalsp)
+{
+	struct sshkey *found_key = NULL;
+	char *principals = NULL;
+	int r, found = 0;
+	const char *reason = NULL;
+	struct sshsigopt *sigopts = NULL;
+
+	if (principalsp != NULL)
+		*principalsp = NULL;
+
+	/* Parse the line */
+	if ((r = parse_principals_key_and_options(path, linenum, line,
+	    NULL, &principals, &found_key, &sigopts)) != 0) {
+		/* error already logged */
+		goto done;
+	}
+
+	if (!sigopts->ca && sshkey_equal(found_key, sign_key)) {
+		/* Exact match of key */
+		debug("%s:%lu: matched key", path, linenum);
+		/* success */
+		found = 1;
+	} else if (sigopts->ca && sshkey_is_cert(sign_key) &&
+	    sshkey_equal_public(sign_key->cert->signature_key, found_key)) {
+		/* Match of certificate's CA key */
+		if ((r = sshkey_cert_check_authority(sign_key, 0, 1,
+		    principals, &reason)) != 0) {
+			error("%s:%lu: certificate not authorized: %s",
+			    path, linenum, reason);
+			goto done;
+		}
+		debug("%s:%lu: matched certificate CA key", path, linenum);
+		/* success */
+		found = 1;
+	} else {
+		/* Key didn't match */
+		goto done;
+	}
+ done:
+	if (found) {
+		*principalsp = principals;
+		principals = NULL; /* transferred */
+	}
+	free(principals);
+	sshkey_free(found_key);
+	sshsigopt_free(sigopts);
+	return found ? 0 : SSH_ERR_KEY_NOT_FOUND;
+}
+
+int
+sshsig_find_principal(const char *path, const struct sshkey *sign_key,
+    char **principal)
+{
+	FILE *f = NULL;
+	char *line = NULL;
+	size_t linesize = 0;
+	u_long linenum = 0;
+	int r, oerrno;
+
+	if ((f = fopen(path, "r")) == NULL) {
+		oerrno = errno;
+		error("Unable to open allowed keys file \"%s\": %s",
+		    path, strerror(errno));
+		errno = oerrno;
+		return SSH_ERR_SYSTEM_ERROR;
+	}
+
+	while (getline(&line, &linesize, f) != -1) {
+		linenum++;
+		r = get_matching_principal_from_line(path, linenum, line,
+		    sign_key, principal);
+		free(line);
+		line = NULL;
+		if (r == SSH_ERR_KEY_NOT_FOUND)
+			continue;
+		else if (r == 0) {
+			/* success */
+			fclose(f);
+			return 0;
+		} else
+			break;
+	}
+	free(line);
+	/* Either we hit an error parsing or we simply didn't find the key */
+	if (ferror(f) != 0) {
+		oerrno = errno;
+		fclose(f);
+		error("Unable to read allowed keys file \"%s\": %s",
+		    path, strerror(errno));
+		errno = oerrno;
+		return SSH_ERR_SYSTEM_ERROR;
+	}
+	fclose(f);
+	return r == 0 ? SSH_ERR_KEY_NOT_FOUND : r;
+}
+
+int
+sshsig_get_pubkey(struct sshbuf *signature, struct sshkey **pubkey)
+{
+	struct sshkey *pk = NULL;
+	int r = SSH_ERR_SIGNATURE_INVALID;
+
+	if (pubkey != NULL)
+		*pubkey = NULL;
+	if ((r = sshsig_parse_preamble(signature)) != 0)
+		return r;
+	if ((r = sshkey_froms(signature, &pk)) != 0)
+		return r;
+
+	*pubkey = pk;
+	pk = NULL;
+	return 0;
 }

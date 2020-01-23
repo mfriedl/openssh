@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect2.c,v 1.314 2019/11/15 02:37:24 djm Exp $ */
+/* $OpenBSD: sshconnect2.c,v 1.318 2020/01/23 10:24:30 dtucker Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2008 Damien Miller.  All rights reserved.
@@ -114,7 +114,7 @@ order_hostkeyalgs(char *host, struct sockaddr *hostaddr, u_short port)
 	for (i = 0; i < options.num_system_hostfiles; i++)
 		load_hostkeys(hostkeys, hostname, options.system_hostfiles[i]);
 
-	oavail = avail = xstrdup(KEX_DEFAULT_PK_ALG);
+	oavail = avail = xstrdup(kex_default_pk_alg());
 	maxlen = strlen(avail) + 1;
 	first = xmalloc(maxlen);
 	last = xmalloc(maxlen);
@@ -169,21 +169,21 @@ ssh_kex2(struct ssh *ssh, char *host, struct sockaddr *hostaddr, u_short port)
 	myproposal[PROPOSAL_ENC_ALGS_STOC] =
 	    compat_cipher_proposal(options.ciphers);
 	myproposal[PROPOSAL_COMP_ALGS_CTOS] =
-	    myproposal[PROPOSAL_COMP_ALGS_STOC] = options.compression ?
-	    "zlib@openssh.com,zlib,none" : "none,zlib@openssh.com,zlib";
+	    myproposal[PROPOSAL_COMP_ALGS_STOC] =
+	    (char *)compression_alg_list(options.compression);
 	myproposal[PROPOSAL_MAC_ALGS_CTOS] =
 	    myproposal[PROPOSAL_MAC_ALGS_STOC] = options.macs;
 	if (options.hostkeyalgorithms != NULL) {
 		all_key = sshkey_alg_list(0, 0, 1, ',');
 		if (kex_assemble_names(&options.hostkeyalgorithms,
-		    KEX_DEFAULT_PK_ALG, all_key) != 0)
+		    kex_default_pk_alg(), all_key) != 0)
 			fatal("%s: kex_assemble_namelist", __func__);
 		free(all_key);
 		myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] =
 		    compat_pkalg_proposal(options.hostkeyalgorithms);
 	} else {
 		/* Enforce default */
-		options.hostkeyalgorithms = xstrdup(KEX_DEFAULT_PK_ALG);
+		options.hostkeyalgorithms = xstrdup(kex_default_pk_alg());
 		/* Prefer algorithms that we already have keys for */
 		myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] =
 		    compat_pkalg_proposal(
@@ -1304,7 +1304,7 @@ sign_and_send_pubkey(struct ssh *ssh, Identity *id)
 			error("%s: no mutual signature supported", __func__);
 			goto out;
 		}
-		debug3("%s: signing using %s", __func__, alg);
+		debug3("%s: signing using %s %s", __func__, alg, fp);
 
 		sshbuf_free(b);
 		if ((b = sshbuf_new()) == NULL)
@@ -1351,7 +1351,9 @@ sign_and_send_pubkey(struct ssh *ssh, Identity *id)
 			    loc, sshkey_type(id->key), fp);
 			continue;
 		}
-		error("%s: signing failed: %s", __func__, ssh_err(r));
+		error("%s: signing failed for %s \"%s\"%s: %s", __func__,
+		    sshkey_type(sign_id->key), sign_id->filename,
+		    id->agent_fd != -1 ? " from agent" : "", ssh_err(r));
 		goto out;
 	}
 	if (slen == 0 || signature == NULL) /* shouldn't happen */
@@ -1915,7 +1917,7 @@ ssh_keysign(struct ssh *ssh, struct sshkey *key, u_char **sigp, size_t *lenp,
 		error("%s: fork: %s", __func__, strerror(errno));
 		return -1;
 	}
-	osigchld = signal(SIGCHLD, SIG_DFL);
+	osigchld = ssh_signal(SIGCHLD, SIG_DFL);
 	if (pid == 0) {
 		close(from[0]);
 		if (dup2(from[1], STDOUT_FILENO) == -1)
@@ -1987,11 +1989,11 @@ ssh_keysign(struct ssh *ssh, struct sshkey *key, u_char **sigp, size_t *lenp,
 	if ((r = sshbuf_get_string(b, sigp, lenp)) != 0) {
 		error("%s: buffer error: %s", __func__, ssh_err(r));
  fail:
-		signal(SIGCHLD, osigchld);
+		ssh_signal(SIGCHLD, osigchld);
 		sshbuf_free(b);
 		return -1;
 	}
-	signal(SIGCHLD, osigchld);
+	ssh_signal(SIGCHLD, osigchld);
 	sshbuf_free(b);
 
 	return 0;
