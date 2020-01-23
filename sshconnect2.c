@@ -1142,9 +1142,9 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
     const u_char *data, size_t datalen, u_int compat, const char *alg)
 {
 	struct sshkey *sign_key = NULL, *prv = NULL;
-	int r = SSH_ERR_INTERNAL_ERROR;
+	int need_pin = 0, i, r = SSH_ERR_INTERNAL_ERROR;
 	struct notifier_ctx *notifier = NULL;
-	char *fp = NULL;
+	char *fp = NULL, *pin = NULL, *prompt = NULL;
 
 	*sigp = NULL;
 	*lenp = 0;
@@ -1173,23 +1173,58 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
 			goto out;
 		}
 		sign_key = prv;
-		if (sshkey_is_sk(sign_key) &&
-		    (sign_key->sk_flags & SSH_SK_USER_PRESENCE_REQD)) {
-			/* XXX match batch mode should just skip these keys? */
-			if ((fp = sshkey_fingerprint(sign_key,
-			    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
-				fatal("%s: sshkey_fingerprint", __func__);
+	}
+	if ((fp = sshkey_fingerprint(sign_key, options.fingerprint_hash,
+	    SSH_FP_DEFAULT)) == NULL)
+		fatal("%s: sshkey_fingerprint", __func__);
+
+	/* Handle options for FIDO keys: touch and PIN required */
+	if (sshkey_is_sk(sign_key)) {
+		if ((sign_key->sk_flags & SSH_SK_USER_PRESENCE_REQD) != 0) {
+			if (options.batch_mode) {
+				debug("Batch mode skipping key %s %s that "
+				   "requires user presence",
+				sshkey_type(sign_key), fp);
+			}
 			notifier = notify_start(options.batch_mode,
 			    "Confirm user presence for key %s %s",
 			    sshkey_type(sign_key), fp);
-			free(fp);
+		}
+		if ((sign_key->sk_flags & SSH_SK_REQUIRE_PIN) != 0) {
+			if (options.batch_mode) {
+				debug("Batch mode skipping key %s %s that "
+				   "requires user presence",
+				sshkey_type(sign_key), fp);
+			}
+			need_pin = 1;
+			xasprintf(&prompt, "Enter PIN for %s %s: ",
+			    sshkey_type(sign_key), fp);
 		}
 	}
-	if ((r = sshkey_sign(sign_key, sigp, lenp, data, datalen,
-	    alg, options.sk_provider, NULL, compat)) != 0) {
-		debug("%s: sshkey_sign: %s", __func__, ssh_err(r));
-		goto out;
+
+	/* Prepare to retry PIN entry if required */
+	for (i = 0; i < 3; i++) {
+		if (need_pin) {
+			freezero(pin, pin == NULL ? 0 : strlen(pin));
+			pin = read_passphrase(prompt, 0);
+			if (pin == NULL || *pin == '\0') {
+				debug("%s: empty pin, skip", __func__);
+				goto out;
+			}
+		}
+		r = sshkey_sign(sign_key, sigp, lenp, data, datalen,
+		    alg, options.sk_provider, pin, compat);
+		if (r == 0)
+			break;
+		else if (need_pin && r == SSH_ERR_KEY_WRONG_PASSPHRASE) {
+			logit("PIN incorrect");
+			continue;
+		} else {
+			debug("%s: sshkey_sign: %s", __func__, ssh_err(r));
+			goto out;
+		}
 	}
+
 	/*
 	 * PKCS#11 tokens may not support all signature algorithms,
 	 * so check what we get back.
@@ -1201,6 +1236,9 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
 	/* success */
 	r = 0;
  out:
+	freezero(pin, pin == NULL ? 0 : strlen(pin));
+	free(fp);
+	free(prompt);
 	notify_complete(notifier);
 	sshkey_free(prv);
 	return r;
