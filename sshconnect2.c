@@ -1186,7 +1186,7 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
 		}
 	}
 	if ((r = sshkey_sign(sign_key, sigp, lenp, data, datalen,
-	    alg, options.sk_provider, compat)) != 0) {
+	    alg, options.sk_provider, NULL, compat)) != 0) {
 		debug("%s: sshkey_sign: %s", __func__, ssh_err(r));
 		goto out;
 	}

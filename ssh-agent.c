@@ -311,7 +311,7 @@ process_sign_request2(SocketEntry *e)
 	}
 	if ((r = sshkey_sign(id->key, &signature, &slen,
 	    data, dlen, agent_decode_alg(key, flags),
-	    id->sk_provider, compat)) != 0) {
+	    id->sk_provider, NULL, compat)) != 0) {
 		error("%s: sshkey_sign: %s", __func__, ssh_err(r));
 		goto send;
 	}

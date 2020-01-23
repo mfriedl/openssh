@@ -274,7 +274,7 @@ main(int argc, char **argv)
 	}
 
 	if ((r = sshkey_sign(keys[i], &signature, &slen, data, dlen,
-	    NULL, NULL, 0)) != 0)
+	    NULL, NULL, NULL, 0)) != 0)
 		fatal("sshkey_sign failed: %s", ssh_err(r));
 	free(data);
 

@@ -566,7 +566,7 @@ do_convert_private_ssh2(struct sshbuf *b)
 
 	/* try the key */
 	if (sshkey_sign(key, &sig, &slen, data, sizeof(data),
-	    NULL, NULL, 0) != 0 ||
+	    NULL, NULL, NULL, 0) != 0 ||
 	    sshkey_verify(key, sig, slen, data, sizeof(data),
 	    NULL, 0, NULL) != 0) {
 		sshkey_free(key);
@@ -1698,7 +1698,8 @@ load_pkcs11_key(char *path)
 static int
 agent_signer(struct sshkey *key, u_char **sigp, size_t *lenp,
     const u_char *data, size_t datalen,
-    const char *alg, const char *provider, u_int compat, void *ctx)
+    const char *alg, const char *provider, const char *pin,
+    u_int compat, void *ctx)
 {
 	int *agent_fdp = (int *)ctx;
 
@@ -1714,7 +1715,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 	int r, i, fd, found, agent_fd = -1;
 	u_int n;
 	struct sshkey *ca, *public;
-	char valid[64], *otmp, *tmp, *cp, *out, *comment;
+	char valid[64], *otmp, *tmp, *cp, *out, *comment, *pin = NULL;
 	char *ca_fp = NULL, **plist = NULL;
 	FILE *f;
 	struct ssh_identitylist *agent_ids;
@@ -1811,7 +1812,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 
 		if (agent_fd != -1 && (ca->flags & SSHKEY_FLAG_EXT) != 0) {
 			if ((r = sshkey_certify_custom(public, ca,
-			    key_type_name, sk_provider, agent_signer,
+			    key_type_name, sk_provider, NULL, agent_signer,
 			    &agent_fd)) != 0)
 				fatal("Couldn't certify key %s via agent: %s",
 				    tmp, ssh_err(r));
@@ -1823,7 +1824,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 				    sshkey_type(ca), ca_fp);
 			}
 			r = sshkey_certify(public, ca, key_type_name,
-			    sk_provider);
+			    sk_provider, pin);
 			notify_complete(notifier);
 			if (r != 0)
 				fatal("Couldn't certify key %s: %s",
@@ -2504,7 +2505,7 @@ sign_one(struct sshkey *signkey, const char *filename, int fd,
 {
 	struct sshbuf *sigbuf = NULL, *abuf = NULL;
 	int r = SSH_ERR_INTERNAL_ERROR, wfd = -1, oerrno;
-	char *wfile = NULL, *asig = NULL, *fp = NULL;
+	char *wfile = NULL, *asig = NULL, *fp = NULL, *pin = NULL;
 
 	if (!quiet) {
 		if (fd == STDIN_FILENO)
@@ -2521,8 +2522,8 @@ sign_one(struct sshkey *signkey, const char *filename, int fd,
 		    sshkey_type(signkey), fp);
 		free(fp);
 	}
-	if ((r = sshsig_sign_fd(signkey, NULL, sk_provider, fd, sig_namespace,
-	    &sigbuf, signer, signer_ctx)) != 0) {
+	if ((r = sshsig_sign_fd(signkey, NULL, sk_provider, pin, fd,
+	    sig_namespace, &sigbuf, signer, signer_ctx)) != 0) {
 		error("Signing %s failed: %s", filename, ssh_err(r));
 		goto out;
 	}
