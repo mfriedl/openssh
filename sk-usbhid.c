@@ -56,6 +56,7 @@
 #define SK_USER_PRESENCE_REQD		0x01
 #define SK_USER_VERIFICATION_REQD	0x04
 #define SK_RESIDENT_KEY			0x20
+#define SK_REQUIRE_PIN			0x40
 
 /* Algs */
 #define	SK_ECDSA		0x00
@@ -545,6 +546,12 @@ sk_enroll(uint32_t alg, const uint8_t *challenge, size_t challenge_len,
 	if ((r = fido_cred_set_rk(cred, (flags & SK_RESIDENT_KEY) != 0 ?
 	    FIDO_OPT_TRUE : FIDO_OPT_OMIT)) != FIDO_OK) {
 		skdebug(__func__, "fido_cred_set_rk: %s", fido_strerr(r));
+		goto out;
+	}
+	if ((r = fido_cred_set_uv(cred,
+	    (flags & SK_USER_VERIFICATION_REQD) != 0 ?
+	    FIDO_OPT_TRUE : FIDO_OPT_OMIT)) != FIDO_OK) {
+		skdebug(__func__, "fido_cred_set_uv: %s", fido_strerr(r));
 		goto out;
 	}
 	if ((r = fido_cred_set_user(cred, user_id, sizeof(user_id),

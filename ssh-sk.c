@@ -457,6 +457,10 @@ sshsk_enroll(int type, const char *provider_path, const char *device,
 		r = SSH_ERR_INVALID_ARGUMENT;
 		goto out;
 	}
+	if ((flags & SSH_SK_REQUIRE_PIN) != 0 && pin == NULL) {
+		debug("%s: pin-required set but no PIN supplied", __func__);
+		r = SSH_ERR_KEY_WRONG_PASSPHRASE;
+	}
 	if (challenge_buf == NULL) {
 		debug("%s: using random challenge", __func__);
 		arc4random_buf(randchall, sizeof(randchall));
@@ -630,11 +634,15 @@ sshsk_sign(const char *provider_path, struct sshkey *key,
 		r = SSH_ERR_INVALID_ARGUMENT;
 		goto out;
 	}
+	if ((key->sk_flags & SSH_SK_REQUIRE_PIN) != 0 && pin == NULL) {
+		debug("%s: pin-required set but no PIN supplied", __func__);
+		r = SSH_ERR_KEY_WRONG_PASSPHRASE;
+		goto out;
+	}
 	if ((skp = sshsk_open(provider_path)) == NULL) {
 		r = SSH_ERR_INVALID_FORMAT; /* XXX sshsk_open return code? */
 		goto out;
 	}
-
 	/* hash data to be signed before it goes to the security key */
 	if ((r = ssh_digest_memory(SSH_DIGEST_SHA256, data, datalen,
 	    message, sizeof(message))) != 0) {

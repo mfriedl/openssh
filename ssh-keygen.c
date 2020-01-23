@@ -3530,6 +3530,11 @@ main(int argc, char **argv)
 		for (i = 0; i < nopts; i++) {
 			if (strcasecmp(opts[i], "no-touch-required") == 0) {
 				sk_flags &= ~SSH_SK_USER_PRESENCE_REQD;
+			} else if (strcasecmp(opts[i],
+			    "user-verification-required") == 0) {
+				sk_flags |= SSH_SK_USER_VERIFICATION_REQD;
+			} else if (strcasecmp(opts[i], "pin-required") == 0) {
+				sk_flags |= SSH_SK_REQUIRE_PIN;
 			} else if (strcasecmp(opts[i], "resident") == 0) {
 				sk_flags |= SSH_SK_RESIDENT_KEY;
 			} else if (strncasecmp(opts[i], "device=", 7) == 0) {
@@ -3550,6 +3555,13 @@ main(int argc, char **argv)
 		}
 		passphrase = NULL;
 		for (i = 0 ; i < 3; i++) {
+			if (passphrase != NULL)
+				freezero(passphrase, strlen(passphrase));
+			if (i > 0 || (sk_flags & SSH_SK_REQUIRE_PIN) != 0) {
+				passphrase = read_passphrase(
+				    "Enter PIN for security key: ",
+				    RP_ALLOW_STDIN);
+			}
 			fflush(stdout);
 			r = sshsk_enroll(type, sk_provider, sk_device,
 			    sk_application == NULL ? "ssh:" : sk_application,
@@ -3559,10 +3571,6 @@ main(int argc, char **argv)
 				break;
 			if (r != SSH_ERR_KEY_WRONG_PASSPHRASE)
 				exit(1); /* error message already printed */
-			if (passphrase != NULL)
-				freezero(passphrase, strlen(passphrase));
-			passphrase = read_passphrase("Enter PIN for security "
-			    "key: ", RP_ALLOW_STDIN);
 		}
 		if (passphrase != NULL)
 			freezero(passphrase, strlen(passphrase));
