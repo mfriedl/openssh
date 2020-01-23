@@ -1823,6 +1823,11 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 				    "Confirm user presence for key %s %s",
 				    sshkey_type(ca), ca_fp);
 			}
+			if (sshkey_is_sk(ca) &&
+			    (ca->sk_flags & SSH_SK_REQUIRE_PIN)) {
+				pin = read_passphrase("Enter PIN for CA key: ",
+			        RP_ALLOW_STDIN);
+			}
 			r = sshkey_certify(public, ca, key_type_name,
 			    sk_provider, pin);
 			notify_complete(notifier);
@@ -1830,6 +1835,7 @@ do_ca_sign(struct passwd *pw, const char *ca_key_path, int prefer_agent,
 				fatal("Couldn't certify key %s: %s",
 				    tmp, ssh_err(r));
 		}
+		free(pin);
 
 		if ((cp = strrchr(tmp, '.')) != NULL && strcmp(cp, ".pub") == 0)
 			*cp = '\0';
@@ -2513,14 +2519,19 @@ sign_one(struct sshkey *signkey, const char *filename, int fd,
 		else
 			fprintf(stderr, "Signing file %s\n", filename);
 	}
-	if (signer == NULL && sshkey_is_sk(signkey) &&
-	    (signkey->sk_flags & SSH_SK_USER_PRESENCE_REQD)) {
-		if ((fp = sshkey_fingerprint(signkey, fingerprint_hash,
-		    SSH_FP_DEFAULT)) == NULL)
-			fatal("%s: sshkey_fingerprint failed", __func__);
-		fprintf(stderr, "Confirm user presence for key %s %s\n",
-		    sshkey_type(signkey), fp);
-		free(fp);
+	if (signer == NULL && sshkey_is_sk(signkey)) {
+		if ((signkey->sk_flags & SSH_SK_REQUIRE_PIN)) {
+			pin = read_passphrase("Enter PIN for signing key: ",
+		        RP_ALLOW_STDIN);
+		}
+		if ((signkey->sk_flags & SSH_SK_USER_PRESENCE_REQD)) {
+			if ((fp = sshkey_fingerprint(signkey, fingerprint_hash,
+			    SSH_FP_DEFAULT)) == NULL)
+				fatal("%s: fingerprint failed", __func__);
+			fprintf(stderr, "Confirm user presence for key %s %s\n",
+			    sshkey_type(signkey), fp);
+			free(fp);
+		}
 	}
 	if ((r = sshsig_sign_fd(signkey, NULL, sk_provider, pin, fd,
 	    sig_namespace, &sigbuf, signer, signer_ctx)) != 0) {
@@ -2570,6 +2581,7 @@ sign_one(struct sshkey *signkey, const char *filename, int fd,
 	/* success */
 	r = 0;
  out:
+	free(pin);
 	free(wfile);
 	free(asig);
 	sshbuf_free(abuf);
