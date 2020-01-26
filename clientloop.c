@@ -1,4 +1,4 @@
-/* $OpenBSD: clientloop.c,v 1.333 2020/01/25 00:21:08 djm Exp $ */
+/* $OpenBSD: clientloop.c,v 1.335 2020/01/26 00:14:45 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -2098,8 +2098,10 @@ client_input_hostkeys(struct ssh *ssh)
 			goto out;
 		}
 		if ((r = sshkey_from_blob(blob, len, &key)) != 0) {
-			error("%s: parse key: %s", __func__, ssh_err(r));
-			goto out;
+			do_log2(r == SSH_ERR_KEY_TYPE_UNKNOWN ?
+			    SYSLOG_LEVEL_DEBUG1 : SYSLOG_LEVEL_ERROR,
+			    "%s: parse key: %s", __func__, ssh_err(r));
+			continue;
 		}
 		fp = sshkey_fingerprint(key, options.fingerprint_hash,
 		    SSH_FP_DEFAULT);
@@ -2158,7 +2160,7 @@ client_input_hostkeys(struct ssh *ssh)
 		    hostkeys_find, ctx, ctx->host_str, ctx->ip_str,
 		    HKF_WANT_PARSE_KEY|HKF_WANT_MATCH)) != 0) {
 			if (r == SSH_ERR_SYSTEM_ERROR && errno == ENOENT) {
-				error("%s: hostkeys file %s does not exist",
+				debug("%s: hostkeys file %s does not exist",
 				    __func__, options.user_hostfiles[i]);
 				continue;
 			}
