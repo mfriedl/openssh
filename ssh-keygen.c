@@ -3003,9 +3003,9 @@ do_download_sk(const char *skprovider, const char *device)
 		free(path);
 		if ((r = sshkey_save_public(keys[i], pubpath,
 		    keys[i]->sk_application)) != 0) {
-			free(pubpath);
 			error("Saving public key \"%s\" failed: %s",
 			    pubpath, ssh_err(r));
+			free(pubpath);
 			break;
 		}
 		free(pubpath);
