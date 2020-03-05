@@ -414,7 +414,7 @@ process_add_identity(SocketEntry *e)
 {
 	Identity *id;
 	int success = 0, confirm = 0;
-	u_int seconds, maxsign;
+	u_int seconds = 0, maxsign;
 	char *fp, *comment = NULL, *ext_name = NULL, *sk_provider = NULL;
 	char canonical_provider[PATH_MAX];
 	time_t death = 0;
