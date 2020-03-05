@@ -1602,6 +1602,8 @@ fail:
 	}
 	if (handle)
 		dlclose(handle);
+	if (ret > 0)
+		ret = -1;
 	return (ret);
 }
 
