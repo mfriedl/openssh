@@ -731,9 +731,11 @@ deserialise_array(struct sshbuf *m, char ***ap, size_t *np)
 	*np = n;
 	n = 0;
  out:
-	for (i = 0; i < n; i++)
-		free(a[i]);
-	free(a);
+	if (a != NULL) {
+		for (i = 0; i < n; i++)
+			free(a[i]);
+		free(a);
+	}
 	sshbuf_free(b);
 	return r;
 }
