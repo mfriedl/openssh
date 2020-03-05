@@ -310,7 +310,7 @@ check_key_not_revoked(struct hostkeys *hostkeys, struct sshkey *k)
 			continue;
 		if (sshkey_equal_public(k, hostkeys->entries[i].key))
 			return -1;
-		if (is_cert &&
+		if (is_cert && k != NULL &&
 		    sshkey_equal_public(k->cert->signature_key,
 		    hostkeys->entries[i].key))
 			return -1;
