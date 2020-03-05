@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh.c,v 1.515 2020/01/25 00:21:08 djm Exp $ */
+/* $OpenBSD: ssh.c,v 1.520 2020/02/18 08:49:49 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -710,13 +710,16 @@ main(int ac, char **av)
 			break;
 		case 'Q':
 			cp = NULL;
-			if (strcmp(optarg, "cipher") == 0)
+			if (strcmp(optarg, "cipher") == 0 ||
+			    strcasecmp(optarg, "Ciphers") == 0)
 				cp = cipher_alg_list('\n', 0);
 			else if (strcmp(optarg, "cipher-auth") == 0)
 				cp = cipher_alg_list('\n', 1);
-			else if (strcmp(optarg, "mac") == 0)
+			else if (strcmp(optarg, "mac") == 0 ||
+			    strcasecmp(optarg, "MACs") == 0)
 				cp = mac_alg_list('\n');
-			else if (strcmp(optarg, "kex") == 0)
+			else if (strcmp(optarg, "kex") == 0 ||
+			    strcasecmp(optarg, "KexAlgorithms") == 0)
 				cp = kex_alg_list('\n');
 			else if (strcmp(optarg, "key") == 0)
 				cp = sshkey_alg_list(0, 0, 0, '\n');
@@ -724,6 +727,12 @@ main(int ac, char **av)
 				cp = sshkey_alg_list(1, 0, 0, '\n');
 			else if (strcmp(optarg, "key-plain") == 0)
 				cp = sshkey_alg_list(0, 1, 0, '\n');
+			else if (strcmp(optarg, "key-sig") == 0 ||
+			    strcasecmp(optarg, "PubkeyAcceptedKeyTypes") == 0 ||
+			    strcasecmp(optarg, "HostKeyAlgorithms") == 0 ||
+			    strcasecmp(optarg, "HostbasedKeyTypes") == 0 ||
+			    strcasecmp(optarg, "HostbasedAcceptedKeyTypes") == 0)
+				cp = sshkey_alg_list(0, 0, 1, '\n');
 			else if (strcmp(optarg, "sig") == 0)
 				cp = sshkey_alg_list(0, 1, 1, '\n');
 			else if (strcmp(optarg, "protocol-version") == 0)
@@ -737,7 +746,7 @@ main(int ac, char **av)
 			} else if (strcmp(optarg, "help") == 0) {
 				cp = xstrdup(
 				    "cipher\ncipher-auth\ncompression\nkex\n"
-				    "key\nkey-cert\nkey-plain\nmac\n"
+				    "key\nkey-cert\nkey-plain\nkey-sig\nmac\n"
 				    "protocol-version\nsig");
 			}
 			if (cp == NULL)
@@ -1178,6 +1187,14 @@ main(int ac, char **av)
 	if (options.jump_host != NULL) {
 		char port_s[8];
 		const char *sshbin = argv0;
+		int port = options.port, jumpport = options.jump_port;
+
+		if (port <= 0)
+			port = default_ssh_port();
+		if (jumpport <= 0)
+			jumpport = default_ssh_port();
+		if (strcmp(options.jump_host, host) == 0 && port == jumpport)
+			fatal("jumphost loop via %s", options.jump_host);
 
 		/*
 		 * Try to use SSH indicated by argv[0], but fall back to
@@ -1237,6 +1254,9 @@ main(int ac, char **av)
 		    options.request_tty == REQUEST_TTY_NO) {
 			debug("UpdateHostKeys=ask is incompatible with "
 			    "remote command execution; disabling");
+			options.update_hostkeys = 0;
+		} else if (options.log_level < SYSLOG_LEVEL_INFO) {
+			/* no point logging anything; user won't see it */
 			options.update_hostkeys = 0;
 		}
 	}
@@ -1352,7 +1372,7 @@ main(int ac, char **av)
 	if (options.sk_provider != NULL && *options.sk_provider == '$' &&
 	    strlen(options.sk_provider) > 1) {
 		if ((cp = getenv(options.sk_provider + 1)) == NULL) {
-			debug("Security key provider %s did not resolve; "
+			debug("Authenticator provider %s did not resolve; "
 			    "disabling", options.sk_provider);
 			free(options.sk_provider);
 			options.sk_provider = NULL;

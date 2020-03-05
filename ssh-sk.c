@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-sk.c,v 1.25 2020/01/25 23:13:09 djm Exp $ */
+/* $OpenBSD: ssh-sk.c,v 1.28 2020/02/28 01:06:05 djm Exp $ */
 /*
  * Copyright (c) 2019 Google LLC
  *
@@ -94,6 +94,10 @@ sshsk_open(const char *path)
 	struct sshsk_provider *ret = NULL;
 	uint32_t version;
 
+	if (path == NULL || *path == '\0') {
+		error("No FIDO SecurityKeyProvider specified");
+		return NULL;
+	}
 	if ((ret = calloc(1, sizeof(*ret))) == NULL) {
 		error("%s: calloc failed", __func__);
 		return NULL;
@@ -110,39 +114,38 @@ sshsk_open(const char *path)
 		return ret;
 	}
 	if ((ret->dlhandle = dlopen(path, RTLD_NOW)) == NULL) {
-		error("Security key provider \"%s\" dlopen failed: %s",
-		    path, dlerror());
+		error("Provider \"%s\" dlopen failed: %s", path, dlerror());
 		goto fail;
 	}
 	if ((ret->sk_api_version = dlsym(ret->dlhandle,
 	    "sk_api_version")) == NULL) {
-		error("Security key provider \"%s\" dlsym(sk_api_version) "
-		    "failed: %s", path, dlerror());
+		error("Provider \"%s\" dlsym(sk_api_version) failed: %s",
+		    path, dlerror());
 		goto fail;
 	}
 	version = ret->sk_api_version();
 	debug("%s: provider %s implements version 0x%08lx", __func__,
 	    ret->path, (u_long)version);
 	if ((version & SSH_SK_VERSION_MAJOR_MASK) != SSH_SK_VERSION_MAJOR) {
-		error("Security key provider \"%s\" implements unsupported "
+		error("Provider \"%s\" implements unsupported "
 		    "version 0x%08lx (supported: 0x%08lx)",
 		    path, (u_long)version, (u_long)SSH_SK_VERSION_MAJOR);
 		goto fail;
 	}
 	if ((ret->sk_enroll = dlsym(ret->dlhandle, "sk_enroll")) == NULL) {
-		error("Security key  provider %s dlsym(sk_enroll) "
-		    "failed: %s", path, dlerror());
+		error("Provider %s dlsym(sk_enroll) failed: %s",
+		    path, dlerror());
 		goto fail;
 	}
 	if ((ret->sk_sign = dlsym(ret->dlhandle, "sk_sign")) == NULL) {
-		error("Security key provider \"%s\" dlsym(sk_sign) failed: %s",
+		error("Provider \"%s\" dlsym(sk_sign) failed: %s",
 		    path, dlerror());
 		goto fail;
 	}
 	if ((ret->sk_load_resident_keys = dlsym(ret->dlhandle,
 	    "sk_load_resident_keys")) == NULL) {
-		error("Security key provider \"%s\" "
-		    "dlsym(sk_load_resident_keys) failed: %s", path, dlerror());
+		error("Provider \"%s\" dlsym(sk_load_resident_keys) "
+		    "failed: %s", path, dlerror());
 		goto fail;
 	}
 	/* success */
@@ -209,7 +212,7 @@ sshsk_ecdsa_assemble(struct sk_enroll_response *resp, struct sshkey **keyp)
 		goto out;
 	}
 	if (sshkey_ec_validate_public(EC_KEY_get0_group(key->ecdsa), q) != 0) {
-		error("Security key returned invalid ECDSA key");
+		error("Authenticator returned invalid ECDSA key");
 		r = SSH_ERR_KEY_INVALID_EC_VALUE;
 		goto out;
 	}
@@ -494,14 +497,14 @@ sshsk_enroll(int type, const char *provider_path, const char *device,
 
 	/* Optionally fill in the attestation information */
 	if (attest != NULL) {
-		if ((r = sshbuf_put_cstring(attest, "sk-attest-v00")) != 0 ||
-		    (r = sshbuf_put_u32(attest, 1)) != 0 || /* XXX U2F ver */
+		if ((r = sshbuf_put_cstring(attest,
+		    "ssh-sk-attest-v00")) != 0 ||
 		    (r = sshbuf_put_string(attest,
 		    resp->attestation_cert, resp->attestation_cert_len)) != 0 ||
 		    (r = sshbuf_put_string(attest,
 		    resp->signature, resp->signature_len)) != 0 ||
-		    (r = sshbuf_put_u32(attest, flags)) != 0 || /* XXX right? */
-		    (r = sshbuf_put_string(attest, NULL, 0)) != 0) {
+		    (r = sshbuf_put_u32(attest, 0)) != 0 || /* resvd flags */
+		    (r = sshbuf_put_string(attest, NULL, 0)) != 0 /* resvd */) {
 			error("%s: buffer error: %s", __func__, ssh_err(r));
 			goto out;
 		}
@@ -748,8 +751,7 @@ sshsk_load_resident(const char *provider_path, const char *device,
 		goto out;
 	}
 	if ((r = skp->sk_load_resident_keys(pin, opts, &rks, &nrks)) != 0) {
-		error("Security key provider \"%s\" returned failure %d",
-		    provider_path, r);
+		error("Provider \"%s\" returned failure %d", provider_path, r);
 		r = skerr_to_ssherr(r);
 		goto out;
 	}

@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.394 2020/01/25 23:13:09 djm Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.400 2020/02/28 01:07:28 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -315,8 +315,7 @@ load_identity(const char *filename, char **commentp)
 	else
 		pass = read_passphrase("Enter passphrase: ", RP_ALLOW_STDIN);
 	r = sshkey_load_private(filename, pass, &prv, commentp);
-	explicit_bzero(pass, strlen(pass));
-	free(pass);
+	freezero(pass, strlen(pass));
 	if (r != 0)
 		fatal("Load key \"%s\": %s", filename, ssh_err(r));
 	return prv;
@@ -1402,8 +1401,7 @@ do_change_passphrase(struct passwd *pw)
 			    RP_ALLOW_STDIN);
 		r = sshkey_load_private(identity_file, old_passphrase,
 		    &private, &comment);
-		explicit_bzero(old_passphrase, strlen(old_passphrase));
-		free(old_passphrase);
+		freezero(old_passphrase, strlen(old_passphrase));
 		if (r != 0)
 			goto badkey;
 	} else if (r != 0) {
@@ -1434,8 +1432,7 @@ do_change_passphrase(struct passwd *pw)
 			exit(1);
 		}
 		/* Destroy the other copy. */
-		explicit_bzero(passphrase2, strlen(passphrase2));
-		free(passphrase2);
+		freezero(passphrase2, strlen(passphrase2));
 	}
 
 	/* Save the file using the new passphrase. */
@@ -1443,15 +1440,13 @@ do_change_passphrase(struct passwd *pw)
 	    comment, private_key_format, openssh_format_cipher, rounds)) != 0) {
 		error("Saving key \"%s\" failed: %s.",
 		    identity_file, ssh_err(r));
-		explicit_bzero(passphrase1, strlen(passphrase1));
-		free(passphrase1);
+		freezero(passphrase1, strlen(passphrase1));
 		sshkey_free(private);
 		free(comment);
 		exit(1);
 	}
 	/* Destroy the passphrase and the copy of the key in memory. */
-	explicit_bzero(passphrase1, strlen(passphrase1));
-	free(passphrase1);
+	freezero(passphrase1, strlen(passphrase1));
 	sshkey_free(private);		 /* Destroys contents */
 	free(comment);
 
@@ -1521,8 +1516,7 @@ do_change_comment(struct passwd *pw, const char *identity_comment)
 		/* Try to load using the passphrase. */
 		if ((r = sshkey_load_private(identity_file, passphrase,
 		    &private, &comment)) != 0) {
-			explicit_bzero(passphrase, strlen(passphrase));
-			free(passphrase);
+			freezero(passphrase, strlen(passphrase));
 			fatal("Cannot load private key \"%s\": %s.",
 			    identity_file, ssh_err(r));
 		}
@@ -1567,14 +1561,12 @@ do_change_comment(struct passwd *pw, const char *identity_comment)
 	    rounds)) != 0) {
 		error("Saving key \"%s\" failed: %s",
 		    identity_file, ssh_err(r));
-		explicit_bzero(passphrase, strlen(passphrase));
-		free(passphrase);
+		freezero(passphrase, strlen(passphrase));
 		sshkey_free(private);
 		free(comment);
 		exit(1);
 	}
-	explicit_bzero(passphrase, strlen(passphrase));
-	free(passphrase);
+	freezero(passphrase, strlen(passphrase));
 	if ((r = sshkey_from_private(private, &public)) != 0)
 		fatal("sshkey_from_private failed: %s", ssh_err(r));
 	sshkey_free(private);
@@ -1656,7 +1648,7 @@ prepare_options_buf(struct sshbuf *c, int which)
 	if ((which & OPTIONS_EXTENSIONS) != 0 &&
 	    (certflags_flags & CERTOPT_USER_RC) != 0)
 		add_flag_option(c, "permit-user-rc");
-	if ((which & OPTIONS_CRITICAL) != 0 &&
+	if ((which & OPTIONS_EXTENSIONS) != 0 &&
 	    (certflags_flags & CERTOPT_NO_REQUIRE_USER_PRESENCE) != 0)
 		add_flag_option(c, "no-touch-required");
 	if ((which & OPTIONS_CRITICAL) != 0 &&
@@ -2949,7 +2941,7 @@ do_download_sk(const char *skprovider, const char *device)
 	if (skprovider == NULL)
 		fatal("Cannot download keys without provider");
 
-	pin = read_passphrase("Enter PIN for security key: ", RP_ALLOW_STDIN);
+	pin = read_passphrase("Enter PIN for authenticator: ", RP_ALLOW_STDIN);
 	if ((r = sshsk_load_resident(skprovider, device, pin,
 	    &keys, &nkeys)) != 0) {
 		freezero(pin, strlen(pin));
@@ -3092,6 +3084,8 @@ main(int argc, char **argv)
 	unsigned long long cert_serial = 0;
 	char *identity_comment = NULL, *ca_key_path = NULL, **opts = NULL;
 	char *sk_application = NULL, *sk_device = NULL, *sk_user = NULL;
+	char *sk_attestaion_path = NULL;
+	struct sshbuf *challenge = NULL, *attest = NULL;
 	size_t i, nopts = 0;
 	u_int32_t bits = 0;
 	uint8_t sk_flags = SSH_SK_USER_PRESENCE_REQD;
@@ -3532,38 +3526,60 @@ main(int argc, char **argv)
 				sk_device = xstrdup(opts[i] + 7);
 			} else if (strncasecmp(opts[i], "user=", 5) == 0) {
 				sk_user = xstrdup(opts[i] + 5);
+			} else if (strncasecmp(opts[i], "challenge=", 10) == 0) {
+				if ((r = sshbuf_load_file(opts[i] + 10,
+				    &challenge)) != 0) {
+					fatal("Unable to load FIDO enrollment "
+					    "challenge \"%s\": %s",
+					    opts[i] + 10, ssh_err(r));
+				}
+			} else if (strncasecmp(opts[i],
+			    "write-attestation=", 18) == 0) {
+				sk_attestaion_path = opts[i] + 18;
 			} else if (strncasecmp(opts[i],
 			    "application=", 12) == 0) {
 				sk_application = xstrdup(opts[i] + 12);
+				if (strncmp(sk_application, "ssh:", 4) != 0) {
+					fatal("FIDO application string must "
+					    "begin with \"ssh:\"");
+				}
 			} else {
 				fatal("Option \"%s\" is unsupported for "
 				    "FIDO authenticator enrollment", opts[i]);
 			}
 		}
 		if (!quiet) {
-			printf("You may need to touch your security key "
+			printf("You may need to touch your authenticator "
 			    "to authorize key generation.\n");
 		}
 		passphrase = NULL;
-		for (i = 0 ; i < 3; i++) {
+		if ((attest = sshbuf_new()) == NULL)
+			fatal("sshbuf_new failed");
+		for (i = 0 ; ; i++) {
 			fflush(stdout);
 			r = sshsk_enroll(type, sk_provider, sk_device,
 			    sk_application == NULL ? "ssh:" : sk_application,
-			    sk_user, sk_flags, passphrase, NULL,
-			    &private, NULL);
+			    sk_user, sk_flags, passphrase, challenge,
+			    &private, attest);
 			if (r == 0)
 				break;
 			if (r != SSH_ERR_KEY_WRONG_PASSPHRASE)
 				fatal("Key enrollment failed: %s", ssh_err(r));
-			if (passphrase != NULL)
+			else if (i > 0)
+				error("PIN incorrect");
+			if (passphrase != NULL) {
 				freezero(passphrase, strlen(passphrase));
-			passphrase = read_passphrase("Enter PIN for security "
-			    "key: ", RP_ALLOW_STDIN);
+				passphrase = NULL;
+			}
+			if (i >= 3)
+				fatal("Too many incorrect PINs");
+			passphrase = read_passphrase("Enter PIN for "
+			    "authenticator: ", RP_ALLOW_STDIN);
 		}
-		if (passphrase != NULL)
+		if (passphrase != NULL) {
 			freezero(passphrase, strlen(passphrase));
-		if (i > 3)
-			fatal("Too many incorrect PINs");
+			passphrase = NULL;
+		}
 		break;
 	default:
 		if ((r = sshkey_generate(type, bits, &private)) != 0)
@@ -3643,6 +3659,22 @@ main(int argc, char **argv)
 		free(fp);
 	}
 
+	if (sk_attestaion_path != NULL) {
+		if (attest == NULL || sshbuf_len(attest) == 0) {
+			fatal("Enrollment did not return attestation "
+			    "certificate");
+		}
+		if ((r = sshbuf_write_file(sk_attestaion_path, attest)) != 0) {
+			fatal("Unable to write attestation certificate "
+			    "\"%s\": %s", sk_attestaion_path, ssh_err(r));
+		}
+		if (!quiet) {
+			printf("Your FIDO attestation certificate has been "
+			    "saved in %s\n", sk_attestaion_path);
+		}
+	}
+	sshbuf_free(attest);
 	sshkey_free(public);
+
 	exit(0);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: clientloop.c,v 1.335 2020/01/26 00:14:45 djm Exp $ */
+/* $OpenBSD: clientloop.c,v 1.342 2020/02/26 13:40:09 jsg Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -450,11 +450,8 @@ client_check_window_change(struct ssh *ssh)
 {
 	if (!received_window_change_signal)
 		return;
-	/** XXX race */
 	received_window_change_signal = 0;
-
 	debug2("%s: changed", __func__);
-
 	channel_send_window_changes(ssh);
 }
 
@@ -469,8 +466,7 @@ client_global_request_reply(int type, u_int32_t seq, struct ssh *ssh)
 		gc->cb(ssh, type, seq, gc->ctx);
 	if (--gc->ref_count <= 0) {
 		TAILQ_REMOVE(&global_confirms, gc, entry);
-		explicit_bzero(gc, sizeof(*gc));
-		free(gc);
+		freezero(gc, sizeof(*gc));
 	}
 
 	ssh_packet_set_alive_timeouts(ssh, 0);
@@ -1384,8 +1380,12 @@ client_loop(struct ssh *ssh, int have_pty, int escape_char_arg,
 		 * Send as much buffered packet data as possible to the
 		 * sender.
 		 */
-		if (FD_ISSET(connection_out, writeset))
-			ssh_packet_write_poll(ssh);
+		if (FD_ISSET(connection_out, writeset)) {
+			if ((r = ssh_packet_write_poll(ssh)) != 0) {
+				sshpkt_fatal(ssh, r,
+				    "%s: ssh_packet_write_poll", __func__);
+			}
+		}
 
 		/*
 		 * If we are a backgrounded control master, and the
@@ -1874,11 +1874,19 @@ hostkeys_find(struct hostkey_foreach_line *l, void *_ctx)
 }
 
 static void
+hostkey_change_preamble(LogLevel loglevel)
+{
+	do_log2(loglevel, "The server has updated its host keys.");
+	do_log2(loglevel, "These changes were verified by the server's "
+	    "existing trusted key.");
+}
+
+static void
 update_known_hosts(struct hostkeys_update_ctx *ctx)
 {
-	int r, was_raw = 0;
-	LogLevel loglevel = options.update_hostkeys == SSH_UPDATE_HOSTKEYS_ASK ?
-	    SYSLOG_LEVEL_INFO : SYSLOG_LEVEL_VERBOSE;
+	int r, was_raw = 0, first = 1;
+	int asking = options.update_hostkeys == SSH_UPDATE_HOSTKEYS_ASK;
+	LogLevel loglevel = asking ?  SYSLOG_LEVEL_INFO : SYSLOG_LEVEL_VERBOSE;
 	char *fp, *response;
 	size_t i;
 	struct stat sb;
@@ -1889,16 +1897,22 @@ update_known_hosts(struct hostkeys_update_ctx *ctx)
 		if ((fp = sshkey_fingerprint(ctx->keys[i],
 		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
 			fatal("%s: sshkey_fingerprint failed", __func__);
+		if (first && asking)
+			hostkey_change_preamble(loglevel);
 		do_log2(loglevel, "Learned new hostkey: %s %s",
 		    sshkey_type(ctx->keys[i]), fp);
+		first = 0;
 		free(fp);
 	}
 	for (i = 0; i < ctx->nold; i++) {
 		if ((fp = sshkey_fingerprint(ctx->old_keys[i],
 		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
 			fatal("%s: sshkey_fingerprint failed", __func__);
+		if (first && asking)
+			hostkey_change_preamble(loglevel);
 		do_log2(loglevel, "Deprecating obsolete hostkey: %s %s",
 		    sshkey_type(ctx->old_keys[i]), fp);
+		first = 0;
 		free(fp);
 	}
 	if (options.update_hostkeys == SSH_UPDATE_HOSTKEYS_ASK) {
@@ -2155,7 +2169,8 @@ client_input_hostkeys(struct ssh *ssh)
 	/* Find which keys we already know about. */
 	for (i = 0; i < options.num_user_hostfiles; i++) {
 		debug("%s: searching %s for %s / %s", __func__,
-		    options.user_hostfiles[i], ctx->host_str, ctx->ip_str);
+		    options.user_hostfiles[i], ctx->host_str,
+		    ctx->ip_str ? ctx->ip_str : "(none)");
 		if ((r = hostkeys_foreach(options.user_hostfiles[i],
 		    hostkeys_find, ctx, ctx->host_str, ctx->ip_str,
 		    HKF_WANT_PARSE_KEY|HKF_WANT_MATCH)) != 0) {

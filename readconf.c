@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.323 2020/01/25 00:22:31 djm Exp $ */
+/* $OpenBSD: readconf.c,v 1.326 2020/02/06 22:46:31 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -2094,6 +2094,8 @@ fill_default_options(Options * options)
 		options->system_hostfiles[options->num_system_hostfiles++] =
 		    xstrdup(_PATH_SSH_SYSTEM_HOSTFILE2);
 	}
+	if (options->update_hostkeys == -1)
+			options->update_hostkeys = SSH_UPDATE_HOSTKEYS_NO;
 	if (options->num_user_hostfiles == 0) {
 		options->user_hostfiles[options->num_user_hostfiles++] =
 		    xstrdup(_PATH_SSH_USER_HOSTFILE);
@@ -2154,8 +2156,6 @@ fill_default_options(Options * options)
 		options->canonicalize_hostname = SSH_CANONICALISE_NO;
 	if (options->fingerprint_hash == -1)
 		options->fingerprint_hash = SSH_FP_HASH_DEFAULT;
-	if (options->update_hostkeys == -1)
-		options->update_hostkeys = SSH_UPDATE_HOSTKEYS_ASK;
 	if (options->sk_provider == NULL)
 		options->sk_provider = xstrdup("internal");
 
@@ -2642,8 +2642,20 @@ dump_cfg_forwards(OpCodes code, u_int count, const struct Forward *fwds)
 void
 dump_client_config(Options *o, const char *host)
 {
-	int i;
-	char buf[8];
+	int i, r;
+	char buf[8], *all_key;
+
+	/*
+	 * Expand HostKeyAlgorithms name lists. This isn't handled in
+	 * fill_default_options() like the other algorithm lists because
+	 * the host key algorithms are by default dynamically chosen based
+	 * on the host's keys found in known_hosts.
+	 */
+	all_key = sshkey_alg_list(0, 0, 1, ',');
+	if ((r = kex_assemble_names(&o->hostkeyalgorithms, kex_default_pk_alg(),
+	    all_key)) != 0)
+		fatal("%s: expand HostKeyAlgorithms: %s", __func__, ssh_err(r));
+	free(all_key);
 
 	/* Most interesting options first: user, host, port */
 	dump_cfg_string(oUser, o->user);
