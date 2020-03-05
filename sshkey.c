@@ -4092,18 +4092,18 @@ sshkey_parse_private2(struct sshbuf *blob, int type, const char *passphrase,
 		r = SSH_ERR_KEY_UNKNOWN_CIPHER;
 		goto out;
 	}
-	if ((passphrase == NULL || strlen(passphrase) == 0) &&
-	    strcmp(ciphername, "none") != 0) {
-		/* passphrase required */
-		r = SSH_ERR_KEY_WRONG_PASSPHRASE;
-		goto out;
-	}
 	if (strcmp(kdfname, "none") != 0 && strcmp(kdfname, "bcrypt") != 0) {
 		r = SSH_ERR_KEY_UNKNOWN_CIPHER;
 		goto out;
 	}
-	if (!strcmp(kdfname, "none") && strcmp(ciphername, "none") != 0) {
+	if (strcmp(kdfname, "none") == 0 && strcmp(ciphername, "none") != 0) {
 		r = SSH_ERR_INVALID_FORMAT;
+		goto out;
+	}
+	if ((passphrase == NULL || strlen(passphrase) == 0) &&
+	    strcmp(kdfname, "none") != 0) {
+		/* passphrase required */
+		r = SSH_ERR_KEY_WRONG_PASSPHRASE;
 		goto out;
 	}
 	if (nkeys != 1) {
