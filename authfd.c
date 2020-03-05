@@ -341,7 +341,7 @@ ssh_agent_has_key(int sock, struct sshkey *key)
 	size_t i;
 	struct ssh_identitylist *idlist = NULL;
 
-	if ((r = ssh_fetch_identitylist(sock, &idlist)) < 0) {
+	if ((r = ssh_fetch_identitylist(sock, &idlist)) != 0) {
 		return r;
 	}
 
