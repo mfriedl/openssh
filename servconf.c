@@ -1910,7 +1910,7 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 			value++;
 			found = 0;
 			if (*arg2 != '/' && *arg2 != '~') {
-				xasprintf(&arg, "%s/%s", SSHDIR, arg);
+				xasprintf(&arg, "%s/%s", SSHDIR, arg2);
 			} else
 				arg = xstrdup(arg2);
 
