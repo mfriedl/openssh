@@ -313,7 +313,7 @@ cleanup_exit(int i)
 int
 main(int argc, char **argv)
 {
-	int r, ch, in, out, max, log_stderr = 0;
+	int r, ch, in, out, log_stderr = 0;
 	ssize_t len;
 	SyslogFacility log_facility = SYSLOG_FACILITY_AUTH;
 	LogLevel log_level = SYSLOG_LEVEL_ERROR;
@@ -345,12 +345,6 @@ main(int argc, char **argv)
 	pkcs11_init(0);
 	in = STDIN_FILENO;
 	out = STDOUT_FILENO;
-
-	max = 0;
-	if (in > max)
-		max = in;
-	if (out > max)
-		max = out;
 
 	if ((iqueue = sshbuf_new()) == NULL)
 		fatal("%s: sshbuf_new failed", __func__);
