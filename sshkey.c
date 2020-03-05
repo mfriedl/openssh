@@ -3027,8 +3027,8 @@ sshkey_cert_check_authority(const struct sshkey *k,
 	u_int i, principal_matches;
 	time_t now = time(NULL);
 
-	if (reason != NULL)
-		*reason = NULL;
+	if (reason == NULL)
+		return SSH_ERR_INVALID_ARGUMENT;
 
 	if (want_host) {
 		if (k->cert->type != SSH2_CERT_TYPE_HOST) {
