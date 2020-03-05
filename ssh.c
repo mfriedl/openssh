@@ -232,6 +232,8 @@ resolve_host(const char *name, int port, int logerr, char *cname, size_t clen)
 
 	if (port <= 0)
 		port = default_ssh_port();
+	if (cname != NULL)
+		*cname = '\0';
 
 	snprintf(strport, sizeof strport, "%d", port);
 	memset(&hints, 0, sizeof(hints));
@@ -461,7 +463,6 @@ resolve_canonicalize(char **hostp, int port)
 	}
 	/* Attempt each supplied suffix */
 	for (i = 0; i < options.num_canonical_domains; i++) {
-		*newname = '\0';
 		xasprintf(&fullhost, "%s.%s.", *hostp,
 		    options.canonical_domains[i]);
 		debug3("%s: attempting \"%s\" => \"%s\"", __func__,
