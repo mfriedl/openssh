@@ -207,7 +207,7 @@ input_service_request(int type, u_int32_t seq, struct ssh *ssh)
 	r = 0;
  out:
 	free(service);
-	return 0;
+	return r;
 }
 
 #define MIN_FAIL_DELAY_SECONDS 0.005
