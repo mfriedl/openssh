@@ -1,4 +1,4 @@
-/* $OpenBSD: hostfile.c,v 1.78 2020/02/26 13:40:09 jsg Exp $ */
+/* $OpenBSD: hostfile.c,v 1.79 2020/03/06 18:25:12 markus Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland

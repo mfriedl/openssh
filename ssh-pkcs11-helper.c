@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-pkcs11-helper.c,v 1.22 2020/01/25 00:03:36 djm Exp $ */
+/* $OpenBSD: ssh-pkcs11-helper.c,v 1.23 2020/03/06 18:26:21 markus Exp $ */
 /*
  * Copyright (c) 2010 Markus Friedl.  All rights reserved.
  *

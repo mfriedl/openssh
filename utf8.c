@@ -1,4 +1,4 @@
-/* $OpenBSD: utf8.c,v 1.8 2018/08/21 13:56:27 schwarze Exp $ */
+/* $OpenBSD: utf8.c,v 1.9 2020/03/06 18:12:55 markus Exp $ */
 /*
  * Copyright (c) 2016 Ingo Schwarze <schwarze@openbsd.org>
  *

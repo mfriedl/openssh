@@ -1,4 +1,4 @@
-/* $OpenBSD: packet.h,v 1.91 2019/09/06 05:23:55 djm Exp $ */
+/* $OpenBSD: packet.h,v 1.92 2020/03/06 18:11:10 markus Exp $ */
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
