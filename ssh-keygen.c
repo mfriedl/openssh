@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keygen.c,v 1.402 2020/03/06 18:29:14 markus Exp $ */
+/* $OpenBSD: ssh-keygen.c,v 1.405 2020/04/03 02:26:56 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1994 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -2417,7 +2417,7 @@ do_gen_krl(struct passwd *pw, int updating, const char *ca_key_path,
 }
 
 static void
-do_check_krl(struct passwd *pw, int argc, char **argv)
+do_check_krl(struct passwd *pw, int print_krl, int argc, char **argv)
 {
 	int i, r, ret = 0;
 	char *comment;
@@ -2427,6 +2427,8 @@ do_check_krl(struct passwd *pw, int argc, char **argv)
 	if (*identity_file == '\0')
 		fatal("KRL checking requires an input file");
 	load_krl(identity_file, &krl);
+	if (print_krl)
+		krl_dump(krl, stdout);
 	for (i = 0; i < argc; i++) {
 		if ((r = sshkey_load_public(argv[i], &k, &comment)) != 0)
 			fatal("Cannot load public key %s: %s",
@@ -2454,7 +2456,7 @@ load_sign_key(const char *keypath, const struct sshkey *pubkey)
 	int r;
 
 	/*
-	 * If passed a public key filename, then try to locate the correponding
+	 * If passed a public key filename, then try to locate the corresponding
 	 * private key. This lets us specify certificates on the command-line
 	 * and have ssh-keygen find the appropriate private key.
 	 */
@@ -2938,18 +2940,25 @@ do_download_sk(const char *skprovider, const char *device)
 	struct sshkey **keys;
 	size_t nkeys, i;
 	int r, ok = -1;
-	char *fp, *pin, *pass = NULL, *path, *pubpath;
+	char *fp, *pin = NULL, *pass = NULL, *path, *pubpath;
 	const char *ext;
 
 	if (skprovider == NULL)
 		fatal("Cannot download keys without provider");
 
-	pin = read_passphrase("Enter PIN for authenticator: ", RP_ALLOW_STDIN);
-	if ((r = sshsk_load_resident(skprovider, device, pin,
-	    &keys, &nkeys)) != 0) {
-		freezero(pin, strlen(pin));
-		error("Unable to load resident keys: %s", ssh_err(r));
-		return -1;
+	for (i = 0; i < 2; i++) {
+		if (i == 1) {
+			pin = read_passphrase("Enter PIN for authenticator: ",
+			    RP_ALLOW_STDIN);
+		}
+		if ((r = sshsk_load_resident(skprovider, device, pin,
+		    &keys, &nkeys)) != 0) {
+			if (i == 0 && r == SSH_ERR_KEY_WRONG_PASSPHRASE)
+				continue;
+			freezero(pin, strlen(pin));
+			error("Unable to load resident keys: %s", ssh_err(r));
+			return -1;
+		}
 	}
 	if (nkeys == 0)
 		logit("No keys to download");
@@ -3057,7 +3066,7 @@ usage(void)
 	    "       ssh-keygen -A [-f prefix_path]\n"
 	    "       ssh-keygen -k -f krl_file [-u] [-s ca_public] [-z version_number]\n"
 	    "                  file ...\n"
-	    "       ssh-keygen -Q -f krl_file file ...\n"
+	    "       ssh-keygen -Q [-l] -f krl_file [file ...]\n"
 	    "       ssh-keygen -Y find-principals -s signature_file -f allowed_signers_file\n"
 	    "       ssh-keygen -Y check-novalidate -n namespace -s signature_file\n"
 	    "       ssh-keygen -Y sign -f key_file -n namespace file ...\n"
@@ -3409,7 +3418,7 @@ main(int argc, char **argv)
 		return (0);
 	}
 	if (check_krl) {
-		do_check_krl(pw, argc, argv);
+		do_check_krl(pw, print_fingerprint, argc, argv);
 		return (0);
 	}
 	if (ca_key_path != NULL) {
