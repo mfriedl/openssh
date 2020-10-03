@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-agent.c,v 1.261 2020/06/22 06:37:38 jmc Exp $ */
+/* $OpenBSD: ssh-agent.c,v 1.264 2020/09/18 08:16:38 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -79,8 +79,8 @@
 #include "ssh-pkcs11.h"
 #include "sk-api.h"
 
-#ifndef DEFAULT_PROVIDER_WHITELIST
-# define DEFAULT_PROVIDER_WHITELIST "/usr/lib*/*,/usr/local/lib*/*"
+#ifndef DEFAULT_ALLOWED_PROVIDERS
+# define DEFAULT_ALLOWED_PROVIDERS "/usr/lib*/*,/usr/local/lib*/*"
 #endif
 
 /* Maximum accepted message length */
@@ -393,9 +393,10 @@ process_sign_request2(SocketEntry *e)
 			    sshkey_type(id->key), fp);
 		}
 	}
+	/* XXX support PIN required FIDO keys */
 	if ((r = sshkey_sign(id->key, &signature, &slen,
 	    data, dlen, agent_decode_alg(key, flags),
-	    id->sk_provider, compat)) != 0) {
+	    id->sk_provider, NULL, compat)) != 0) {
 		error("%s: sshkey_sign: %s", __func__, ssh_err(r));
 		goto send;
 	}
@@ -837,8 +838,10 @@ send:
 }
 #endif /* ENABLE_PKCS11 */
 
-/* dispatch incoming messages */
-
+/*
+ * dispatch incoming message.
+ * returns 1 on success, 0 for incomplete messages or -1 on error.
+ */
 static int
 process_message(u_int socknum)
 {
@@ -892,7 +895,7 @@ process_message(u_int socknum)
 			/* send a fail message for all other request types */
 			send_status(e, 0);
 		}
-		return 0;
+		return 1;
 	}
 
 	switch (type) {
@@ -936,7 +939,7 @@ process_message(u_int socknum)
 		send_status(e, 0);
 		break;
 	}
-	return 0;
+	return 1;
 }
 
 static void
@@ -1027,7 +1030,12 @@ handle_conn_read(u_int socknum)
 	if ((r = sshbuf_put(sockets[socknum].input, buf, len)) != 0)
 		fatal("%s: buffer error: %s", __func__, ssh_err(r));
 	explicit_bzero(buf, sizeof(buf));
-	process_message(socknum);
+	for (;;) {
+		if ((r = process_message(socknum)) == -1)
+			return -1;
+		else if (r == 0)
+			break;
+	}
 	return 0;
 }
 
@@ -1340,7 +1348,7 @@ main(int ac, char **av)
 		usage();
 
 	if (allowed_providers == NULL)
-		allowed_providers = xstrdup(DEFAULT_PROVIDER_WHITELIST);
+		allowed_providers = xstrdup(DEFAULT_ALLOWED_PROVIDERS);
 
 	if (ac == 0 && !c_flag && !s_flag) {
 		shell = getenv("SHELL");
