@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh-keyscan.c,v 1.132 2020/08/12 01:23:45 cheloha Exp $ */
+/* $OpenBSD: ssh-keyscan.c,v 1.137 2020/10/19 08:07:08 djm Exp $ */
 /*
  * Copyright 1995, 1996 by David Mazieres <dm@lcs.mit.edu>.
  *
@@ -349,7 +349,7 @@ tcpconnect(char *host)
 			continue;
 		}
 		if (set_nonblock(s) == -1)
-			fatal("%s: set_nonblock(%d)", __func__, s);
+			fatal_f("set_nonblock(%d)", s);
 		if (connect(s, ai->ai_addr, ai->ai_addrlen) == -1 &&
 		    errno != EINPROGRESS)
 			error("connect (`%s'): %s", host, strerror(errno));
@@ -383,7 +383,7 @@ conalloc(char *iname, char *oname, int keytype)
 	if (fdcon[s].c_status)
 		fatal("conalloc: attempt to reuse fdno %d", s);
 
-	debug3("%s: oname %s kt %d", __func__, oname, keytype);
+	debug3_f("oname %s kt %d", oname, keytype);
 	fdcon[s].c_fd = s;
 	fdcon[s].c_status = CS_CON;
 	fdcon[s].c_namebase = namebase;
@@ -617,14 +617,15 @@ do_host(char *host)
 }
 
 void
-fatal(const char *fmt,...)
+sshfatal(const char *file, const char *func, int line, int showfunc,
+    LogLevel level, const char *suffix, const char *fmt, ...)
 {
 	va_list args;
 
 	va_start(args, fmt);
-	do_log(SYSLOG_LEVEL_FATAL, fmt, args);
+	sshlogv(file, func, line, showfunc, level, suffix, fmt, args);
 	va_end(args);
-	exit(255);
+	cleanup_exit(255);
 }
 
 static void
@@ -766,8 +767,7 @@ main(int argc, char **argv)
 		if (argv[j] == NULL)
 			fp = stdin;
 		else if ((fp = fopen(argv[j], "r")) == NULL)
-			fatal("%s: %s: %s", __progname, argv[j],
-			    strerror(errno));
+			fatal("%s: %s: %s", __progname, argv[j], strerror(errno));
 
 		while (getline(&line, &linesize, fp) != -1) {
 			/* Chomp off trailing whitespace and comments */
@@ -789,8 +789,7 @@ main(int argc, char **argv)
 		}
 
 		if (ferror(fp))
-			fatal("%s: %s: %s", __progname, argv[j],
-			    strerror(errno));
+			fatal("%s: %s: %s", __progname, argv[j], strerror(errno));
 
 		fclose(fp);
 	}

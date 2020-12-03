@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect.c,v 1.332 2020/09/09 21:57:27 djm Exp $ */
+/* $OpenBSD: sshconnect.c,v 1.345 2020/11/27 00:49:58 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <limits.h>
 #include <paths.h>
 #include <signal.h>
 #include <pwd.h>
@@ -93,24 +94,6 @@ expand_proxy_command(const char *proxy_command, const char *user,
 	return ret;
 }
 
-static void
-stderr_null(void)
-{
-	int devnull;
-
-	if ((devnull = open(_PATH_DEVNULL, O_WRONLY)) == -1) {
-		error("Can't open %s for stderr redirection: %s",
-		    _PATH_DEVNULL, strerror(errno));
-		return;
-	}
-	if (devnull == STDERR_FILENO)
-		return;
-	if (dup2(devnull, STDERR_FILENO) == -1)
-		error("Cannot redirect stderr to %s", _PATH_DEVNULL);
-	if (devnull > STDERR_FILENO)
-		close(devnull);
-}
-
 /*
  * Connect to the given ssh server using a proxy command that passes a
  * a connected fd back to us.
@@ -157,8 +140,8 @@ ssh_proxy_fdpass_connect(struct ssh *ssh, const char *host,
 		 * error messages may be printed on the user's terminal.
 		 */
 		if (!debug_flag && options.control_path != NULL &&
-		    options.control_persist)
-			stderr_null();
+		    options.control_persist && stdfd_devnull(0, 0, 1) == -1)
+			error_f("stdfd_devnull failed");
 
 		argv[0] = shell;
 		argv[1] = "-c";
@@ -240,8 +223,8 @@ ssh_proxy_connect(struct ssh *ssh, const char *host, const char *host_arg,
 		 * error messages may be printed on the user's terminal.
 		 */
 		if (!debug_flag && options.control_path != NULL &&
-		    options.control_persist)
-			stderr_null();
+		    options.control_persist && stdfd_devnull(0, 0, 1) == -1)
+			error_f("stdfd_devnull failed");
 
 		argv[0] = shell;
 		argv[1] = "-c";
@@ -319,8 +302,7 @@ check_ifaddrs(const char *ifname, int af, const struct ifaddrs *ifaddrs,
 				    htonl(INADDR_LOOPBACK))
 					continue;
 				if (*rlenp < sizeof(struct sockaddr_in)) {
-					error("%s: v4 addr doesn't fit",
-					    __func__);
+					error_f("v4 addr doesn't fit");
 					return -1;
 				}
 				*rlenp = sizeof(struct sockaddr_in);
@@ -334,8 +316,7 @@ check_ifaddrs(const char *ifname, int af, const struct ifaddrs *ifaddrs,
 				    IN6_IS_ADDR_LOOPBACK(v6addr)))
 					continue;
 				if (*rlenp < sizeof(struct sockaddr_in6)) {
-					error("%s: v6 addr doesn't fit",
-					    __func__);
+					error_f("v6 addr doesn't fit");
 					return -1;
 				}
 				*rlenp = sizeof(struct sockaddr_in6);
@@ -366,6 +347,10 @@ ssh_create_socket(struct addrinfo *ai)
 		return -1;
 	}
 	fcntl(sock, F_SETFD, FD_CLOEXEC);
+
+	/* Use interactive QOS (if specified) until authentication completed */
+	if (options.ip_qos_interactive != INT_MAX)
+		set_sock_tos(sock, options.ip_qos_interactive);
 
 	/* Bind the socket to an alternative local IP address */
 	if (options.bind_address == NULL && options.bind_interface == NULL)
@@ -405,15 +390,14 @@ ssh_create_socket(struct addrinfo *ai)
 	}
 	if ((r = getnameinfo((struct sockaddr *)&bindaddr, bindaddrlen,
 	    ntop, sizeof(ntop), NULL, 0, NI_NUMERICHOST)) != 0) {
-		error("%s: getnameinfo failed: %s", __func__,
-		    ssh_gai_strerror(r));
+		error_f("getnameinfo failed: %s", ssh_gai_strerror(r));
 		goto fail;
 	}
 	if (bind(sock, (struct sockaddr *)&bindaddr, bindaddrlen) != 0) {
 		error("bind %s: %s", ntop, strerror(errno));
 		goto fail;
 	}
-	debug("%s: bound to %s", __func__, ntop);
+	debug_f("bound to %s", ntop);
 	/* success */
 	goto out;
 fail:
@@ -438,15 +422,15 @@ fail:
  */
 static int
 ssh_connect_direct(struct ssh *ssh, const char *host, struct addrinfo *aitop,
-    struct sockaddr_storage *hostaddr, u_short port, int family,
-    int connection_attempts, int *timeout_ms, int want_keepalive)
+    struct sockaddr_storage *hostaddr, u_short port, int connection_attempts,
+    int *timeout_ms, int want_keepalive)
 {
 	int on = 1, saved_timeout_ms = *timeout_ms;
 	int oerrno, sock = -1, attempt;
 	char ntop[NI_MAXHOST], strport[NI_MAXSERV];
 	struct addrinfo *ai;
 
-	debug2("%s", __func__);
+	debug3_f("entering");
 	memset(ntop, 0, sizeof(ntop));
 	memset(strport, 0, sizeof(strport));
 
@@ -470,7 +454,7 @@ ssh_connect_direct(struct ssh *ssh, const char *host, struct addrinfo *aitop,
 			    ntop, sizeof(ntop), strport, sizeof(strport),
 			    NI_NUMERICHOST|NI_NUMERICSERV) != 0) {
 				oerrno = errno;
-				error("%s: getnameinfo failed", __func__);
+				error_f("getnameinfo failed");
 				errno = oerrno;
 				continue;
 			}
@@ -529,19 +513,19 @@ ssh_connect_direct(struct ssh *ssh, const char *host, struct addrinfo *aitop,
 int
 ssh_connect(struct ssh *ssh, const char *host, const char *host_arg,
     struct addrinfo *addrs, struct sockaddr_storage *hostaddr, u_short port,
-    int family, int connection_attempts, int *timeout_ms, int want_keepalive)
+    int connection_attempts, int *timeout_ms, int want_keepalive)
 {
 	int in, out;
 
 	if (options.proxy_command == NULL) {
 		return ssh_connect_direct(ssh, host, addrs, hostaddr, port,
-		    family, connection_attempts, timeout_ms, want_keepalive);
+		    connection_attempts, timeout_ms, want_keepalive);
 	} else if (strcmp(options.proxy_command, "-") == 0) {
 		if ((in = dup(STDIN_FILENO)) == -1 ||
 		    (out = dup(STDOUT_FILENO)) == -1) {
 			if (in >= 0)
 				close(in);
-			error("%s: dup() in/out failed", __func__);
+			error_f("dup() in/out failed");
 			return -1; /* ssh_packet_set_connection logs error */
 		}
 		if ((ssh_packet_set_connection(ssh, in, out)) == NULL)
@@ -600,12 +584,16 @@ check_host_cert(const char *host, const struct sshkey *key)
 	}
 	if ((r = sshkey_check_cert_sigtype(key,
 	    options.ca_sign_algorithms)) != 0) {
-		logit("%s: certificate signature algorithm %s: %s", __func__,
+		logit_fr(r, "certificate signature algorithm %s",
 		    (key->cert == NULL || key->cert->signature_type == NULL) ?
-		    "(null)" : key->cert->signature_type, ssh_err(r));
+		    "(null)" : key->cert->signature_type);
 		return 0;
 	}
-
+	/* Do not attempt hostkey update if a certificate was successful */
+	if (options.update_hostkeys != 0) {
+		options.update_hostkeys = 0;
+		debug3_f("certificate host key in use; disabling UpdateHostkeys");
+	}
 	return 1;
 }
 
@@ -642,7 +630,7 @@ get_hostfile_hostname_ipaddr(char *hostname, struct sockaddr *hostaddr,
 		if (options.proxy_command == NULL) {
 			if (getnameinfo(hostaddr, hostaddr->sa_len,
 			    ntop, sizeof(ntop), NULL, 0, NI_NUMERICHOST) != 0)
-			fatal("%s: getnameinfo failed", __func__);
+			fatal_f("getnameinfo failed");
 			*hostfile_ipaddr = put_host_port(ntop, port);
 		} else {
 			*hostfile_ipaddr = xstrdup("<no hostip for proxy "
@@ -666,6 +654,179 @@ get_hostfile_hostname_ipaddr(char *hostname, struct sockaddr *hostaddr,
 	}
 }
 
+/* returns non-zero if path appears in hostfiles, or 0 if not. */
+static int
+path_in_hostfiles(const char *path, char **hostfiles, u_int num_hostfiles)
+{
+	u_int i;
+
+	for (i = 0; i < num_hostfiles; i++) {
+		if (strcmp(path, hostfiles[i]) == 0)
+			return 1;
+	}
+	return 0;
+}
+
+struct find_by_key_ctx {
+	const char *host, *ip;
+	const struct sshkey *key;
+	char **names;
+	u_int nnames;
+};
+
+/* Try to replace home directory prefix (per $HOME) with a ~/ sequence */
+static char *
+try_tilde_unexpand(const char *path)
+{
+	char *home, *ret = NULL;
+	size_t l;
+
+	if (*path != '/')
+		return xstrdup(path);
+	if ((home = getenv("HOME")) == NULL || (l = strlen(home)) == 0)
+		return xstrdup(path);
+	if (strncmp(path, home, l) != 0)
+		return xstrdup(path);
+	/*
+	 * ensure we have matched on a path boundary: either the $HOME that
+	 * we just compared ends with a '/' or the next character of the path
+	 * must be a '/'.
+	 */
+	if (home[l - 1] != '/' && path[l] != '/')
+		return xstrdup(path);
+	if (path[l] == '/')
+		l++;
+	xasprintf(&ret, "~/%s", path + l);
+	return ret;
+}
+
+static int
+hostkeys_find_by_key_cb(struct hostkey_foreach_line *l, void *_ctx)
+{
+	struct find_by_key_ctx *ctx = (struct find_by_key_ctx *)_ctx;
+	char *path;
+
+	/* we are looking for keys with names that *do not* match */
+	if ((l->match & HKF_MATCH_HOST) != 0)
+		return 0;
+	/* not interested in marker lines */
+	if (l->marker != MRK_NONE)
+		return 0;
+	/* we are only interested in exact key matches */
+	if (l->key == NULL || !sshkey_equal(ctx->key, l->key))
+		return 0;
+	path = try_tilde_unexpand(l->path);
+	debug_f("found matching key in %s:%lu", path, l->linenum);
+	ctx->names = xrecallocarray(ctx->names,
+	    ctx->nnames, ctx->nnames + 1, sizeof(*ctx->names));
+	xasprintf(&ctx->names[ctx->nnames], "%s:%lu: %s", path, l->linenum,
+	    strncmp(l->hosts, HASH_MAGIC, strlen(HASH_MAGIC)) == 0 ?
+	    "[hashed name]" : l->hosts);
+	ctx->nnames++;
+	free(path);
+	return 0;
+}
+
+static int
+hostkeys_find_by_key_hostfile(const char *file, const char *which,
+    struct find_by_key_ctx *ctx)
+{
+	int r;
+
+	debug3_f("trying %s hostfile \"%s\"", which, file);
+	if ((r = hostkeys_foreach(file, hostkeys_find_by_key_cb, ctx,
+	    ctx->host, ctx->ip, HKF_WANT_PARSE_KEY)) != 0) {
+		if (r == SSH_ERR_SYSTEM_ERROR && errno == ENOENT) {
+			debug_f("hostkeys file %s does not exist", file);
+			return 0;
+		}
+		error_fr(r, "hostkeys_foreach failed for %s", file);
+		return r;
+	}
+	return 0;
+}
+
+/*
+ * Find 'key' in known hosts file(s) that do not match host/ip.
+ * Used to display also-known-as information for previously-unseen hostkeys.
+ */
+static void
+hostkeys_find_by_key(const char *host, const char *ip, const struct sshkey *key,
+    char **user_hostfiles, u_int num_user_hostfiles,
+    char **system_hostfiles, u_int num_system_hostfiles,
+    char ***names, u_int *nnames)
+{
+	struct find_by_key_ctx ctx = {0, 0, 0, 0, 0};
+	u_int i;
+
+	*names = NULL;
+	*nnames = 0;
+
+	if (key == NULL || sshkey_is_cert(key))
+		return;
+
+	ctx.host = host;
+	ctx.ip = ip;
+	ctx.key = key;
+
+	for (i = 0; i < num_user_hostfiles; i++) {
+		if (hostkeys_find_by_key_hostfile(user_hostfiles[i],
+		    "user", &ctx) != 0)
+			goto fail;
+	}
+	for (i = 0; i < num_system_hostfiles; i++) {
+		if (hostkeys_find_by_key_hostfile(system_hostfiles[i],
+		    "system", &ctx) != 0)
+			goto fail;
+	}
+	/* success */
+	*names = ctx.names;
+	*nnames = ctx.nnames;
+	ctx.names = NULL;
+	ctx.nnames = 0;
+	return;
+ fail:
+	for (i = 0; i < ctx.nnames; i++)
+		free(ctx.names[i]);
+	free(ctx.names);
+}
+
+#define MAX_OTHER_NAMES	8 /* Maximum number of names to list */
+static char *
+other_hostkeys_message(const char *host, const char *ip,
+    const struct sshkey *key,
+    char **user_hostfiles, u_int num_user_hostfiles,
+    char **system_hostfiles, u_int num_system_hostfiles)
+{
+	char *ret = NULL, **othernames = NULL;
+	u_int i, n, num_othernames = 0;
+
+	hostkeys_find_by_key(host, ip, key,
+	    user_hostfiles, num_user_hostfiles,
+	    system_hostfiles, num_system_hostfiles,
+	    &othernames, &num_othernames);
+	if (num_othernames == 0)
+		return xstrdup("This key is not known by any other names");
+
+	xasprintf(&ret, "This host key is known by the following other "
+	    "names/addresses:");
+
+	n = num_othernames;
+	if (n > MAX_OTHER_NAMES)
+		n = MAX_OTHER_NAMES;
+	for (i = 0; i < n; i++) {
+		xextendf(&ret, "\n", "    %s", othernames[i]);
+	}
+	if (n < num_othernames) {
+		xextendf(&ret, "\n", "    (%d additional names ommitted)",
+		    num_othernames - n);
+	}
+	for (i = 0; i < num_othernames; i++)
+		free(othernames[i]);
+	free(othernames);
+	return ret;
+}
+
 /*
  * check whether the supplied host key is valid, return -1 if the key
  * is not valid. user_hostfile[0] will not be updated if 'readonly' is true.
@@ -679,14 +840,13 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
     char **user_hostfiles, u_int num_user_hostfiles,
     char **system_hostfiles, u_int num_system_hostfiles)
 {
-	HostStatus host_status;
-	HostStatus ip_status;
+	HostStatus host_status = -1, ip_status = -1;
 	struct sshkey *raw_key = NULL;
 	char *ip = NULL, *host = NULL;
 	char hostline[1000], *hostp, *fp, *ra;
 	char msg[1024];
 	const char *type;
-	const struct hostkey_entry *host_found, *ip_found;
+	const struct hostkey_entry *host_found = NULL, *ip_found = NULL;
 	int len, cancelled_forwarding = 0, confirmed;
 	int local = sockaddr_is_local(hostaddr);
 	int r, want_cert = sshkey_is_cert(host_key), host_ip_differ = 0;
@@ -706,6 +866,7 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 	    options.host_key_alias == NULL) {
 		debug("Forcing accepting of host key for "
 		    "loopback/localhost.");
+		options.update_hostkeys = 0;
 		return 0;
 	}
 
@@ -777,6 +938,17 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		    !check_host_cert(options.host_key_alias == NULL ?
 		    hostname : options.host_key_alias, host_key))
 			goto fail;
+		/* Turn off UpdateHostkeys if key was in system known_hosts */
+		if (options.update_hostkeys != 0 &&
+		    (path_in_hostfiles(host_found->file,
+		    system_hostfiles, num_system_hostfiles) ||
+		    (ip_status == HOST_OK && ip_found != NULL &&
+		    path_in_hostfiles(ip_found->file,
+		    system_hostfiles, num_system_hostfiles)))) {
+			options.update_hostkeys = 0;
+			debug3_f("host key found in GlobalKnownHostsFile; "
+			    "disabling UpdateHostkeys");
+		}
 		if (options.check_host_ip && ip_status == HOST_NEW) {
 			if (readonly || want_cert)
 				logit("%s host key for IP address "
@@ -798,7 +970,7 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			ra = sshkey_fingerprint(host_key,
 			    options.fingerprint_hash, SSH_FP_RANDOMART);
 			if (fp == NULL || ra == NULL)
-				fatal("%s: sshkey_fingerprint fail", __func__);
+				fatal_f("sshkey_fingerprint failed");
 			logit("Host key fingerprint is %s\n%s", fp, ra);
 			free(ra);
 			free(fp);
@@ -831,45 +1003,48 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			goto fail;
 		} else if (options.strict_host_key_checking ==
 		    SSH_STRICT_HOSTKEY_ASK) {
-			char msg1[1024], msg2[1024];
+			char *msg1 = NULL, *msg2 = NULL;
 
-			if (show_other_keys(host_hostkeys, host_key))
-				snprintf(msg1, sizeof(msg1),
-				    "\nbut keys of different type are already"
-				    " known for this host.");
-			else
-				snprintf(msg1, sizeof(msg1), ".");
-			/* The default */
+			xasprintf(&msg1, "The authenticity of host "
+			    "'%.200s (%s)' can't be established", host, ip);
+
+			if (show_other_keys(host_hostkeys, host_key)) {
+				xextendf(&msg1, "\n", "but keys of different "
+				    "type are already known for this host.");
+			} else
+				xextendf(&msg1, "", ".");
+
 			fp = sshkey_fingerprint(host_key,
 			    options.fingerprint_hash, SSH_FP_DEFAULT);
 			ra = sshkey_fingerprint(host_key,
 			    options.fingerprint_hash, SSH_FP_RANDOMART);
 			if (fp == NULL || ra == NULL)
-				fatal("%s: sshkey_fingerprint fail", __func__);
-			msg2[0] = '\0';
+				fatal_f("sshkey_fingerprint failed");
+			xextendf(&msg1, "\n", "%s key fingerprint is %s.",
+			    type, fp);
+			if (options.visual_host_key)
+				xextendf(&msg1, "\n", "%s", ra);
 			if (options.verify_host_key_dns) {
-				if (matching_host_key_dns)
-					snprintf(msg2, sizeof(msg2),
-					    "Matching host key fingerprint"
-					    " found in DNS.\n");
-				else
-					snprintf(msg2, sizeof(msg2),
-					    "No matching host key fingerprint"
-					    " found in DNS.\n");
+				xextendf(&msg1, "\n",
+				    "%s host key fingerprint found in DNS.",
+				    matching_host_key_dns ?
+				    "Matching" : "No matching");
 			}
-			snprintf(msg, sizeof(msg),
-			    "The authenticity of host '%.200s (%s)' can't be "
-			    "established%s\n"
-			    "%s key fingerprint is %s.%s%s\n%s"
+			/* msg2 informs for other names matching this key */
+			if ((msg2 = other_hostkeys_message(host, ip, host_key,
+			    user_hostfiles, num_user_hostfiles,
+			    system_hostfiles, num_system_hostfiles)) != NULL)
+				xextendf(&msg1, "\n", "%s", msg2);
+
+			xextendf(&msg1, "\n",
 			    "Are you sure you want to continue connecting "
-			    "(yes/no/[fingerprint])? ",
-			    host, ip, msg1, type, fp,
-			    options.visual_host_key ? "\n" : "",
-			    options.visual_host_key ? ra : "",
-			    msg2);
+			    "(yes/no/[fingerprint])? ");
+
+			confirmed = confirm(msg1, fp);
 			free(ra);
-			confirmed = confirm(msg, fp);
 			free(fp);
+			free(msg1);
+			free(msg2);
 			if (!confirmed)
 				goto fail;
 			hostkey_trusted = 1; /* user explicitly confirmed */
@@ -974,8 +1149,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		 */
 		if (options.strict_host_key_checking !=
 		    SSH_STRICT_HOSTKEY_OFF) {
-			error("%s host key for %.200s has changed and you have "
-			    "requested strict checking.", type, host);
+			error("Host key for %.200s has changed and you have "
+			    "requested strict checking.", host);
 			goto fail;
 		}
 
@@ -1030,6 +1205,11 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			options.tun_open = SSH_TUNMODE_NO;
 			cancelled_forwarding = 1;
 		}
+		if (options.update_hostkeys != 0) {
+			error("UpdateHostkeys is disabled because the host "
+			    "key is not trusted.");
+			options.update_hostkeys = 0;
+		}
 		if (options.exit_on_forward_failure && cancelled_forwarding)
 			fatal("Error: forwarding disabled due to host key "
 			    "check failure");
@@ -1077,8 +1257,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 	}
 
 	if (!hostkey_trusted && options.update_hostkeys) {
-		debug("%s: hostkey not known or explicitly trusted: "
-		    "disabling UpdateHostkeys", __func__);
+		debug_f("hostkey not known or explicitly trusted: "
+		    "disabling UpdateHostkeys");
 		options.update_hostkeys = 0;
 	}
 
@@ -1098,10 +1278,9 @@ fail:
 		 */
 		debug("No matching CA found. Retry with plain key");
 		if ((r = sshkey_from_private(host_key, &raw_key)) != 0)
-			fatal("%s: sshkey_from_private: %s",
-			    __func__, ssh_err(r));
+			fatal_fr(r, "decode key");
 		if ((r = sshkey_drop_cert(raw_key)) != 0)
-			fatal("Couldn't drop certificate: %s", ssh_err(r));
+			fatal_r(r, "Couldn't drop certificate");
 		host_key = raw_key;
 		goto retry;
 	}
@@ -1126,7 +1305,7 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
 
 	if ((fp = sshkey_fingerprint(host_key,
 	    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL) {
-		error("%s: fingerprint host key: %s", __func__, ssh_err(r));
+		error_fr(r, "fingerprint host key");
 		r = -1;
 		goto out;
 	}
@@ -1134,8 +1313,7 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
 	if (sshkey_is_cert(host_key)) {
 		if ((cafp = sshkey_fingerprint(host_key->cert->signature_key,
 		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL) {
-			error("%s: fingerprint CA key: %s",
-			    __func__, ssh_err(r));
+			error_fr(r, "fingerprint CA key");
 			r = -1;
 			goto out;
 		}
@@ -1157,8 +1335,8 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
 	}
 
 	if (sshkey_equal(previous_host_key, host_key)) {
-		debug2("%s: server host key %s %s matches cached key",
-		    __func__, sshkey_type(host_key), fp);
+		debug2_f("server host key %s %s matches cached key",
+		    sshkey_type(host_key), fp);
 		r = 0;
 		goto out;
 	}
@@ -1176,9 +1354,9 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
 			r = -1;
 			goto out;
 		default:
-			error("Error checking host key %s %s in "
-			    "revoked keys file %s: %s", sshkey_type(host_key),
-			    fp, options.revoked_host_keys, ssh_err(r));
+			error_r(r, "Error checking host key %s %s in "
+			    "revoked keys file %s", sshkey_type(host_key),
+			    fp, options.revoked_host_keys);
 			r = -1;
 			goto out;
 		}
@@ -1285,14 +1463,15 @@ show_other_keys(struct hostkeys *hostkeys, struct sshkey *key)
 	for (i = 0; type[i] != -1; i++) {
 		if (type[i] == key->type)
 			continue;
-		if (!lookup_key_in_hostkeys_by_type(hostkeys, type[i], &found))
+		if (!lookup_key_in_hostkeys_by_type(hostkeys, type[i],
+		    -1, &found))
 			continue;
 		fp = sshkey_fingerprint(found->key,
 		    options.fingerprint_hash, SSH_FP_DEFAULT);
 		ra = sshkey_fingerprint(found->key,
 		    options.fingerprint_hash, SSH_FP_RANDOMART);
 		if (fp == NULL || ra == NULL)
-			fatal("%s: sshkey_fingerprint fail", __func__);
+			fatal_f("sshkey_fingerprint fail");
 		logit("WARNING: %s key found for host %s\n"
 		    "in %s:%lu\n"
 		    "%s key fingerprint %s.",
@@ -1316,7 +1495,7 @@ warn_changed_key(struct sshkey *host_key)
 	fp = sshkey_fingerprint(host_key, options.fingerprint_hash,
 	    SSH_FP_DEFAULT);
 	if (fp == NULL)
-		fatal("%s: sshkey_fingerprint fail", __func__);
+		fatal_f("sshkey_fingerprint fail");
 
 	error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 	error("@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @");

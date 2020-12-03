@@ -1,4 +1,4 @@
-/* $OpenBSD: servconf.h,v 1.146 2020/08/27 01:07:10 djm Exp $ */
+/* $OpenBSD: servconf.h,v 1.148 2020/10/29 03:13:06 djm Exp $ */
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -118,6 +118,8 @@ typedef struct {
 	struct ForwardOptions fwd_opts;	/* forwarding options */
 	SyslogFacility log_facility;	/* Facility for system logging. */
 	LogLevel log_level;	/* Level for system logging. */
+	u_int	num_log_verbose;	/* Verbose log overrides */
+	char	**log_verbose;
 	int     hostbased_authentication;	/* If true, permit ssh2 hostbased auth */
 	int     hostbased_uses_name_from_packet_only; /* experimental */
 	char   *hostbased_key_types;	/* Key types allowed for hostbased */
@@ -275,9 +277,11 @@ TAILQ_HEAD(include_list, include_item);
 		M_CP_STRARRAYOPT(allow_groups, num_allow_groups); \
 		M_CP_STRARRAYOPT(deny_groups, num_deny_groups); \
 		M_CP_STRARRAYOPT(accept_env, num_accept_env); \
+		M_CP_STRARRAYOPT(setenv, num_setenv); \
 		M_CP_STRARRAYOPT(auth_methods, num_auth_methods); \
 		M_CP_STRARRAYOPT(permitted_opens, num_permitted_opens); \
 		M_CP_STRARRAYOPT(permitted_listens, num_permitted_listens); \
+		M_CP_STRARRAYOPT(log_verbose, num_log_verbose); \
 	} while (0)
 
 struct connection_info *get_connection_info(struct ssh *, int, int);

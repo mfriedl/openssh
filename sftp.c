@@ -1,4 +1,4 @@
-/* $OpenBSD: sftp.c,v 1.201 2020/08/03 02:43:41 djm Exp $ */
+/* $OpenBSD: sftp.c,v 1.204 2020/10/29 02:52:43 djm Exp $ */
 /*
  * Copyright (c) 2001-2004 Damien Miller <djm@openbsd.org>
  *
@@ -1144,7 +1144,7 @@ undo_glob_escape(char *s)
  * last argument's quote has been properly terminated or 0 otherwise.
  * This parameter is only of use if "sloppy" is set.
  */
-#define MAXARGS 	128
+#define MAXARGS		128
 #define MAXARGLEN	8192
 static char **
 makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
@@ -1302,7 +1302,7 @@ parse_args(const char **cpp, int *ignore_errors, int *disable_echo, int *aflag,
 	const char *cmd, *cp = *cpp;
 	char *cp2, **argv;
 	int base = 0;
-	long l;
+	long long ll;
 	int path1_mandatory = 0, i, cmdnum, optidx, argc;
 
 	/* Skip leading whitespace */
@@ -1460,16 +1460,16 @@ parse_args(const char **cpp, int *ignore_errors, int *disable_echo, int *aflag,
 		if (argc - optidx < 1)
 			goto need_num_arg;
 		errno = 0;
-		l = strtol(argv[optidx], &cp2, base);
+		ll = strtoll(argv[optidx], &cp2, base);
 		if (cp2 == argv[optidx] || *cp2 != '\0' ||
-		    ((l == LONG_MIN || l == LONG_MAX) && errno == ERANGE) ||
-		    l < 0) {
+		    ((ll == LLONG_MIN || ll == LLONG_MAX) && errno == ERANGE) ||
+		    ll < 0 || ll > UINT32_MAX) {
  need_num_arg:
 			error("You must supply a numeric argument "
 			    "to the %s command.", cmd);
 			return -1;
 		}
-		*n_arg = l;
+		*n_arg = ll;
 		if (cmdnum == I_LUMASK)
 			break;
 		/* Get pathname (mandatory) */
@@ -2072,7 +2072,7 @@ complete(EditLine *el, int ch)
 
 	lf = el_line(el);
 	if (el_get(el, EL_CLIENTDATA, (void**)&complete_ctx) != 0)
-		fatal("%s: el_get failed", __func__);
+		fatal_f("el_get failed");
 
 	/* Figure out which argument the cursor points to */
 	cursor = lf->cursor - lf->buffer;
