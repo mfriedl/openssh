@@ -1,4 +1,4 @@
-/* $OpenBSD: sshconnect.c,v 1.345 2020/11/27 00:49:58 djm Exp $ */
+/* $OpenBSD: sshconnect.c,v 1.349 2020/12/22 00:15:23 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -735,7 +735,7 @@ hostkeys_find_by_key_hostfile(const char *file, const char *which,
 
 	debug3_f("trying %s hostfile \"%s\"", which, file);
 	if ((r = hostkeys_foreach(file, hostkeys_find_by_key_cb, ctx,
-	    ctx->host, ctx->ip, HKF_WANT_PARSE_KEY)) != 0) {
+	    ctx->host, ctx->ip, HKF_WANT_PARSE_KEY, 0)) != 0) {
 		if (r == SSH_ERR_SYSTEM_ERROR && errno == ENOENT) {
 			debug_f("hostkeys file %s does not exist", file);
 			return 0;
@@ -827,6 +827,84 @@ other_hostkeys_message(const char *host, const char *ip,
 	return ret;
 }
 
+void
+load_hostkeys_command(struct hostkeys *hostkeys, const char *command_template,
+    const char *invocation, const struct ssh_conn_info *cinfo,
+    const struct sshkey *host_key, const char *hostfile_hostname)
+{
+	int r, i, ac = 0;
+	char *key_fp = NULL, *keytext = NULL, *tmp;
+	char *command = NULL, *tag = NULL, **av = NULL;
+	FILE *f = NULL;
+	pid_t pid;
+	void (*osigchld)(int);
+
+	xasprintf(&tag, "KnownHostsCommand-%s", invocation);
+
+	if (host_key != NULL) {
+		if ((key_fp = sshkey_fingerprint(host_key,
+		    options.fingerprint_hash, SSH_FP_DEFAULT)) == NULL)
+			fatal_f("sshkey_fingerprint failed");
+		if ((r = sshkey_to_base64(host_key, &keytext)) != 0)
+			fatal_fr(r, "sshkey_to_base64 failed");
+	}
+	/*
+	 * NB. all returns later this function should go via "out" to
+	 * ensure the original SIGCHLD handler is restored properly.
+	 */
+	osigchld = ssh_signal(SIGCHLD, SIG_DFL);
+
+	/* Turn the command into an argument vector */
+	if (argv_split(command_template, &ac, &av) != 0) {
+		error("%s \"%s\" contains invalid quotes", tag,
+		   command_template);
+		goto out;
+	}
+	if (ac == 0) {
+		error("%s \"%s\" yielded no arguments", tag,
+		    command_template);
+		goto out;
+	}
+	for (i = 1; i < ac; i++) {
+		tmp = percent_dollar_expand(av[i],
+		    DEFAULT_CLIENT_PERCENT_EXPAND_ARGS(cinfo),
+		    "H", hostfile_hostname,
+		    "I", invocation,
+		    "t", host_key == NULL ? "NONE" : sshkey_ssh_name(host_key),
+		    "f", key_fp == NULL ? "NONE" : key_fp,
+		    "K", keytext == NULL ? "NONE" : keytext,
+		    (char *)NULL);
+		if (tmp == NULL)
+			fatal_f("percent_expand failed");
+		free(av[i]);
+		av[i] = tmp;
+	}
+	/* Prepare a printable command for logs, etc. */
+	command = argv_assemble(ac, av);
+
+	if ((pid = subprocess(tag, command, ac, av, &f,
+	    SSH_SUBPROCESS_STDOUT_CAPTURE|SSH_SUBPROCESS_UNSAFE_PATH|
+	    SSH_SUBPROCESS_PRESERVE_ENV, NULL, NULL, NULL)) == 0)
+		goto out;
+
+	load_hostkeys_file(hostkeys, hostfile_hostname, tag, f, 1);
+
+	if (exited_cleanly(pid, tag, command, 0) != 0)
+		fatal("KnownHostsCommand failed");
+
+ out:
+	if (f != NULL)
+		fclose(f);
+	ssh_signal(SIGCHLD, osigchld);
+	for (i = 0; i < ac; i++)
+		free(av[i]);
+	free(av);
+	free(tag);
+	free(command);
+	free(key_fp);
+	free(keytext);
+}
+
 /*
  * check whether the supplied host key is valid, return -1 if the key
  * is not valid. user_hostfile[0] will not be updated if 'readonly' is true.
@@ -835,10 +913,12 @@ other_hostkeys_message(const char *host, const char *ip,
 #define RDONLY	1
 #define ROQUIET	2
 static int
-check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
-    struct sshkey *host_key, int readonly,
+check_host_key(char *hostname, const struct ssh_conn_info *cinfo,
+    struct sockaddr *hostaddr, u_short port,
+    struct sshkey *host_key, int readonly, int clobber_port,
     char **user_hostfiles, u_int num_user_hostfiles,
-    char **system_hostfiles, u_int num_system_hostfiles)
+    char **system_hostfiles, u_int num_system_hostfiles,
+    const char *hostfile_command)
 {
 	HostStatus host_status = -1, ip_status = -1;
 	struct sshkey *raw_key = NULL;
@@ -874,7 +954,8 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 	 * Prepare the hostname and address strings used for hostkey lookup.
 	 * In some cases, these will have a port number appended.
 	 */
-	get_hostfile_hostname_ipaddr(hostname, hostaddr, port, &host, &ip);
+	get_hostfile_hostname_ipaddr(hostname, hostaddr,
+	    clobber_port ? 0 : port, &host, &ip);
 
 	/*
 	 * Turn off check_host_ip if the connection is to localhost, via proxy
@@ -886,17 +967,25 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 
 	host_hostkeys = init_hostkeys();
 	for (i = 0; i < num_user_hostfiles; i++)
-		load_hostkeys(host_hostkeys, host, user_hostfiles[i]);
+		load_hostkeys(host_hostkeys, host, user_hostfiles[i], 0);
 	for (i = 0; i < num_system_hostfiles; i++)
-		load_hostkeys(host_hostkeys, host, system_hostfiles[i]);
+		load_hostkeys(host_hostkeys, host, system_hostfiles[i], 0);
+	if (hostfile_command != NULL && !clobber_port) {
+		load_hostkeys_command(host_hostkeys, hostfile_command,
+		    "HOSTNAME", cinfo, host_key, host);
+	}
 
 	ip_hostkeys = NULL;
 	if (!want_cert && options.check_host_ip) {
 		ip_hostkeys = init_hostkeys();
 		for (i = 0; i < num_user_hostfiles; i++)
-			load_hostkeys(ip_hostkeys, ip, user_hostfiles[i]);
+			load_hostkeys(ip_hostkeys, ip, user_hostfiles[i], 0);
 		for (i = 0; i < num_system_hostfiles; i++)
-			load_hostkeys(ip_hostkeys, ip, system_hostfiles[i]);
+			load_hostkeys(ip_hostkeys, ip, system_hostfiles[i], 0);
+		if (hostfile_command != NULL && !clobber_port) {
+			load_hostkeys_command(ip_hostkeys, hostfile_command,
+			    "ADDRESS", cinfo, host_key, ip);
+		}
 	}
 
  retry:
@@ -910,6 +999,14 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 	 */
 	host_status = check_key_in_hostkeys(host_hostkeys, host_key,
 	    &host_found);
+
+	/*
+	 * If there are no hostfiles, or if the hostkey was found via
+	 * KnownHostsCommand, then don't try to touch the disk.
+	 */
+	if (!readonly && (num_user_hostfiles == 0 ||
+	    (host_found != NULL && host_found->note != 0)))
+		readonly = RDONLY;
 
 	/*
 	 * Also perform check for the ip address, skip the check if we are
@@ -949,6 +1046,11 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 			debug3_f("host key found in GlobalKnownHostsFile; "
 			    "disabling UpdateHostkeys");
 		}
+		if (options.update_hostkeys != 0 && host_found->note) {
+			options.update_hostkeys = 0;
+			debug3_f("host key found via KnownHostsCommand; "
+			    "disabling UpdateHostkeys");
+		}
 		if (options.check_host_ip && ip_status == HOST_NEW) {
 			if (readonly || want_cert)
 				logit("%s host key for IP address "
@@ -979,11 +1081,13 @@ check_host_key(char *hostname, struct sockaddr *hostaddr, u_short port,
 		break;
 	case HOST_NEW:
 		if (options.host_key_alias == NULL && port != 0 &&
-		    port != SSH_DEFAULT_PORT) {
+		    port != SSH_DEFAULT_PORT && !clobber_port) {
 			debug("checking without port identifier");
-			if (check_host_key(hostname, hostaddr, 0, host_key,
-			    ROQUIET, user_hostfiles, num_user_hostfiles,
-			    system_hostfiles, num_system_hostfiles) == 0) {
+			if (check_host_key(hostname, cinfo, hostaddr, 0,
+			    host_key, ROQUIET, 1,
+			    user_hostfiles, num_user_hostfiles,
+			    system_hostfiles, num_system_hostfiles,
+			    hostfile_command) == 0) {
 				debug("found matching key w/out port");
 				break;
 			}
@@ -1296,7 +1400,8 @@ fail:
 
 /* returns 0 if key verifies or -1 if key does NOT verify */
 int
-verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
+verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key,
+    const struct ssh_conn_info *cinfo)
 {
 	u_int i;
 	int r = -1, flags = 0;
@@ -1390,9 +1495,10 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key)
 			}
 		}
 	}
-	r = check_host_key(host, hostaddr, options.port, host_key, RDRW,
-	    options.user_hostfiles, options.num_user_hostfiles,
-	    options.system_hostfiles, options.num_system_hostfiles);
+	r = check_host_key(host, cinfo, hostaddr, options.port, host_key,
+	    RDRW, 0, options.user_hostfiles, options.num_user_hostfiles,
+	    options.system_hostfiles, options.num_system_hostfiles,
+	    options.known_hosts_command);
 
 out:
 	sshkey_free(plain);
@@ -1415,7 +1521,8 @@ out:
  */
 void
 ssh_login(struct ssh *ssh, Sensitive *sensitive, const char *orighost,
-    struct sockaddr *hostaddr, u_short port, struct passwd *pw, int timeout_ms)
+    struct sockaddr *hostaddr, u_short port, struct passwd *pw, int timeout_ms,
+    const struct ssh_conn_info *cinfo)
 {
 	char *host;
 	char *server_user, *local_user;
@@ -1438,7 +1545,7 @@ ssh_login(struct ssh *ssh, Sensitive *sensitive, const char *orighost,
 	/* key exchange */
 	/* authenticate user */
 	debug("Authenticating to %s:%d as '%s'", host, port, server_user);
-	ssh_kex2(ssh, host, hostaddr, port);
+	ssh_kex2(ssh, host, hostaddr, port, cinfo);
 	ssh_userauth2(ssh, local_user, server_user, host, sensitive);
 	free(local_user);
 	free(host);
