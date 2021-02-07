@@ -1,4 +1,4 @@
-/* $OpenBSD: sshd.c,v 1.565 2020/11/08 11:46:12 dtucker Exp $ */
+/* $OpenBSD: sshd.c,v 1.570 2021/02/05 02:20:23 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -106,6 +106,7 @@
 #include "version.h"
 #include "ssherr.h"
 #include "sk-api.h"
+#include "srclimit.h"
 
 /* Re-exec fds */
 #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
@@ -185,13 +186,6 @@ struct {
 /* This is set to true when a signal is received. */
 static volatile sig_atomic_t received_sighup = 0;
 static volatile sig_atomic_t received_sigterm = 0;
-
-/* session identifier, used by RSA-auth */
-u_char session_id[16];
-
-/* same for ssh2 */
-u_char *session_id2 = NULL;
-u_int session_id2_len = 0;
 
 /* record remote hostname or ip */
 u_int utmp_len = HOST_NAME_MAX+1;
@@ -322,8 +316,6 @@ main_sigchld_handler(int sig)
 	int save_errno = errno;
 	pid_t pid;
 	int status;
-
-	debug("main_sigchld_handler: %s", strsignal(sig));
 
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0 ||
 	    (pid == -1 && errno == EINTR))
@@ -812,7 +804,7 @@ should_drop_connection(int startups)
  * while in that state.
  */
 static int
-drop_connection(int sock, int startups)
+drop_connection(int sock, int startups, int notify_pipe)
 {
 	char *laddr, *raddr;
 	const char msg[] = "Exceeded MaxStartups\r\n";
@@ -822,7 +814,8 @@ drop_connection(int sock, int startups)
 	time_t now;
 
 	now = monotime();
-	if (!should_drop_connection(startups)) {
+	if (!should_drop_connection(startups) &&
+	    srclimit_check_allow(sock, notify_pipe) == 1) {
 		if (last_drop != 0 &&
 		    startups < options.max_startups_begin - 1) {
 			/* XXX maybe need better hysteresis here */
@@ -1056,6 +1049,10 @@ server_listen(void)
 {
 	u_int i;
 
+	/* Initialise per-source limit tracking. */
+	srclimit_init(options.max_startups, options.per_source_max_startups,
+	    options.per_source_masklen_ipv4, options.per_source_masklen_ipv6);
+
 	for (i = 0; i < options.num_listen_addrs; i++) {
 		listen_on_addrs(&options.listen_addrs[i]);
 		freeaddrinfo(options.listen_addrs[i].addrs);
@@ -1161,6 +1158,7 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s)
 			case 0:
 				/* child exited or completed auth */
 				close(startup_pipes[i]);
+				srclimit_done(startup_pipes[i]);
 				startup_pipes[i] = -1;
 				startups--;
 				if (startup_flags[i])
@@ -1191,9 +1189,12 @@ server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s)
 				continue;
 			}
 			if (unset_nonblock(*newsock) == -1 ||
-			    drop_connection(*newsock, startups) ||
-			    pipe(startup_p) == -1) {
+			    pipe(startup_p) == -1)
+				continue;
+			if (drop_connection(*newsock, startups, startup_p[0])) {
 				close(*newsock);
+				close(startup_p[0]);
+				close(startup_p[1]);
 				continue;
 			}
 
@@ -2163,11 +2164,11 @@ do_ssh2_kex(struct ssh *ssh)
 	struct kex *kex;
 	int r;
 
-	myproposal[PROPOSAL_KEX_ALGS] = compat_kex_proposal(
+	myproposal[PROPOSAL_KEX_ALGS] = compat_kex_proposal(ssh,
 	    options.kex_algorithms);
-	myproposal[PROPOSAL_ENC_ALGS_CTOS] = compat_cipher_proposal(
+	myproposal[PROPOSAL_ENC_ALGS_CTOS] = compat_cipher_proposal(ssh,
 	    options.ciphers);
-	myproposal[PROPOSAL_ENC_ALGS_STOC] = compat_cipher_proposal(
+	myproposal[PROPOSAL_ENC_ALGS_STOC] = compat_cipher_proposal(ssh,
 	    options.ciphers);
 	myproposal[PROPOSAL_MAC_ALGS_CTOS] =
 	    myproposal[PROPOSAL_MAC_ALGS_STOC] = options.macs;
@@ -2182,7 +2183,7 @@ do_ssh2_kex(struct ssh *ssh)
 		    options.rekey_interval);
 
 	myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] = compat_pkalg_proposal(
-	    list_hostkey_types());
+	    ssh, list_hostkey_types());
 
 	/* start key exchange */
 	if ((r = kex_setup(ssh, myproposal)) != 0)
@@ -2199,16 +2200,13 @@ do_ssh2_kex(struct ssh *ssh)
 	kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
 #endif
 	kex->kex[KEX_C25519_SHA256] = kex_gen_server;
-	kex->kex[KEX_KEM_SNTRUP4591761X25519_SHA512] = kex_gen_server;
+	kex->kex[KEX_KEM_SNTRUP761X25519_SHA512] = kex_gen_server;
 	kex->load_host_public_key=&get_hostkey_public_by_type;
 	kex->load_host_private_key=&get_hostkey_private_by_type;
 	kex->host_key_index=&get_hostkey_index;
 	kex->sign = sshd_hostkey_sign;
 
 	ssh_dispatch_run_fatal(ssh, DISPATCH_BLOCK, &kex->done);
-
-	session_id2 = kex->session_id;
-	session_id2_len = kex->session_id_len;
 
 #ifdef DEBUG_KEXDH
 	/* send 1st encrypted/maced/compressed message */

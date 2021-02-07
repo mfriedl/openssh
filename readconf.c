@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.347 2020/12/22 03:05:31 tb Exp $ */
+/* $OpenBSD: readconf.c,v 1.350 2021/01/26 05:32:21 dtucker Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -156,8 +156,8 @@ typedef enum {
 	oCanonicalDomains, oCanonicalizeHostname, oCanonicalizeMaxDots,
 	oCanonicalizeFallbackLocal, oCanonicalizePermittedCNAMEs,
 	oStreamLocalBindMask, oStreamLocalBindUnlink, oRevokedHostKeys,
-	oFingerprintHash, oUpdateHostkeys, oHostbasedKeyTypes,
-	oPubkeyAcceptedKeyTypes, oCASignatureAlgorithms, oProxyJump,
+	oFingerprintHash, oUpdateHostkeys, oHostbasedAcceptedAlgorithms,
+	oPubkeyAcceptedAlgorithms, oCASignatureAlgorithms, oProxyJump,
 	oSecurityKeyProvider, oKnownHostsCommand,
 	oIgnore, oIgnoredUnknownOption, oDeprecated, oUnsupported
 } OpCodes;
@@ -292,8 +292,10 @@ static struct {
 	{ "revokedhostkeys", oRevokedHostKeys },
 	{ "fingerprinthash", oFingerprintHash },
 	{ "updatehostkeys", oUpdateHostkeys },
-	{ "hostbasedkeytypes", oHostbasedKeyTypes },
-	{ "pubkeyacceptedkeytypes", oPubkeyAcceptedKeyTypes },
+	{ "hostbasedkeytypes", oHostbasedAcceptedAlgorithms }, /* obsolete */
+	{ "hostbasedalgorithms", oHostbasedAcceptedAlgorithms },
+	{ "pubkeyacceptedkeytypes", oPubkeyAcceptedAlgorithms }, /* obsolete */
+	{ "pubkeyacceptedalgorithms", oPubkeyAcceptedAlgorithms },
 	{ "ignoreunknown", oIgnoreUnknown },
 	{ "proxyjump", oProxyJump },
 	{ "securitykeyprovider", oSecurityKeyProvider },
@@ -1359,7 +1361,7 @@ parse_int:
 
 	case oHostKeyAlgorithms:
 		charptr = &options->hostkeyalgorithms;
-parse_keytypes:
+parse_pubkey_algos:
 		arg = strdelim(&s);
 		if (!arg || *arg == '\0') {
 			error("%.200s line %d: Missing argument.",
@@ -1379,7 +1381,7 @@ parse_keytypes:
 
 	case oCASignatureAlgorithms:
 		charptr = &options->ca_sign_algorithms;
-		goto parse_keytypes;
+		goto parse_pubkey_algos;
 
 	case oLogLevel:
 		log_level_ptr = &options->log_level;
@@ -1918,13 +1920,13 @@ parse_keytypes:
 		multistate_ptr = multistate_yesnoask;
 		goto parse_multistate;
 
-	case oHostbasedKeyTypes:
-		charptr = &options->hostbased_key_types;
-		goto parse_keytypes;
+	case oHostbasedAcceptedAlgorithms:
+		charptr = &options->hostbased_accepted_algos;
+		goto parse_pubkey_algos;
 
-	case oPubkeyAcceptedKeyTypes:
-		charptr = &options->pubkey_key_types;
-		goto parse_keytypes;
+	case oPubkeyAcceptedAlgorithms:
+		charptr = &options->pubkey_accepted_algos;
+		goto parse_pubkey_algos;
 
 	case oAddKeysToAgent:
 		arg = strdelim(&s);
@@ -2206,8 +2208,8 @@ initialize_options(Options * options)
 	options->revoked_host_keys = NULL;
 	options->fingerprint_hash = -1;
 	options->update_hostkeys = -1;
-	options->hostbased_key_types = NULL;
-	options->pubkey_key_types = NULL;
+	options->hostbased_accepted_algos = NULL;
+	options->pubkey_accepted_algos = NULL;
 	options->known_hosts_command = NULL;
 }
 
@@ -2283,7 +2285,7 @@ fill_default_options(Options * options)
 	if (options->batch_mode == -1)
 		options->batch_mode = 0;
 	if (options->check_host_ip == -1)
-		options->check_host_ip = 1;
+		options->check_host_ip = 0;
 	if (options->strict_host_key_checking == -1)
 		options->strict_host_key_checking = SSH_STRICT_HOSTKEY_ASK;
 	if (options->compression == -1)
@@ -2418,8 +2420,8 @@ fill_default_options(Options * options)
 	ASSEMBLE(ciphers, def_cipher, all_cipher);
 	ASSEMBLE(macs, def_mac, all_mac);
 	ASSEMBLE(kex_algorithms, def_kex, all_kex);
-	ASSEMBLE(hostbased_key_types, def_key, all_key);
-	ASSEMBLE(pubkey_key_types, def_key, all_key);
+	ASSEMBLE(hostbased_accepted_algos, def_key, all_key);
+	ASSEMBLE(pubkey_accepted_algos, def_key, all_key);
 	ASSEMBLE(ca_sign_algorithms, def_sig, all_sig);
 #undef ASSEMBLE
 
@@ -2538,8 +2540,8 @@ free_options(Options *o)
 		free(o->permitted_cnames[i].target_list);
 	}
 	free(o->revoked_host_keys);
-	free(o->hostbased_key_types);
-	free(o->pubkey_key_types);
+	free(o->hostbased_accepted_algos);
+	free(o->pubkey_accepted_algos);
 	free(o->jump_user);
 	free(o->jump_host);
 	free(o->jump_extra);
@@ -3065,7 +3067,7 @@ dump_client_config(Options *o, const char *host)
 	dump_cfg_string(oControlPath, o->control_path);
 	dump_cfg_string(oHostKeyAlgorithms, o->hostkeyalgorithms);
 	dump_cfg_string(oHostKeyAlias, o->host_key_alias);
-	dump_cfg_string(oHostbasedKeyTypes, o->hostbased_key_types);
+	dump_cfg_string(oHostbasedAcceptedAlgorithms, o->hostbased_accepted_algos);
 	dump_cfg_string(oIdentityAgent, o->identity_agent);
 	dump_cfg_string(oIgnoreUnknown, o->ignored_unknown);
 	dump_cfg_string(oKbdInteractiveDevices, o->kbd_interactive_devices);
@@ -3080,7 +3082,7 @@ dump_client_config(Options *o, const char *host)
 #endif
 	dump_cfg_string(oSecurityKeyProvider, o->sk_provider);
 	dump_cfg_string(oPreferredAuthentications, o->preferred_authentications);
-	dump_cfg_string(oPubkeyAcceptedKeyTypes, o->pubkey_key_types);
+	dump_cfg_string(oPubkeyAcceptedAlgorithms, o->pubkey_accepted_algos);
 	dump_cfg_string(oRevokedHostKeys, o->revoked_host_keys);
 	dump_cfg_string(oXAuthLocation, o->xauth_location);
 	dump_cfg_string(oKnownHostsCommand, o->known_hosts_command);

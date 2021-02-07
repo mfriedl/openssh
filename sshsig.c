@@ -1,4 +1,4 @@
-/* $OpenBSD: sshsig.c,v 1.18 2020/10/18 11:32:02 djm Exp $ */
+/* $OpenBSD: sshsig.c,v 1.20 2021/01/31 10:50:10 dtucker Exp $ */
 /*
  * Copyright (c) 2019 Google LLC
  *
@@ -807,7 +807,7 @@ check_allowed_keys_line(const char *path, u_long linenum, char *line,
 	} else if (sigopts->ca && sshkey_is_cert(sign_key) &&
 	    sshkey_equal_public(sign_key->cert->signature_key, found_key)) {
 		/* Match of certificate's CA key */
-		if ((r = sshkey_cert_check_authority(sign_key, 0, 1,
+		if ((r = sshkey_cert_check_authority(sign_key, 0, 1, 0,
 		    principal, &reason)) != 0) {
 			error("%s:%lu: certificate not authorized: %s",
 			    path, linenum, reason);
@@ -851,6 +851,7 @@ sshsig_check_allowed_keys(const char *path, const struct sshkey *sign_key,
 		    principal, sig_namespace);
 		free(line);
 		line = NULL;
+		linesize = 0;
 		if (r == SSH_ERR_KEY_NOT_FOUND)
 			continue;
 		else if (r == 0) {
@@ -890,7 +891,7 @@ cert_filter_principals(const char *path, u_long linenum,
 			continue;
 		}
 		/* Check against principals list in certificate */
-		if ((r = sshkey_cert_check_authority(cert, 0, 1,
+		if ((r = sshkey_cert_check_authority(cert, 0, 1, 0,
 		    cp, &reason)) != 0) {
 			debug("%s:%lu: principal \"%s\" not authorized: %s",
 			    path, linenum, cp, reason);
@@ -996,6 +997,7 @@ sshsig_find_principals(const char *path, const struct sshkey *sign_key,
 		    sign_key, principals);
 		free(line);
 		line = NULL;
+		linesize = 0;
 		if (r == SSH_ERR_KEY_NOT_FOUND)
 			continue;
 		else if (r == 0) {

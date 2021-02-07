@@ -1,5 +1,5 @@
 
-/* $OpenBSD: servconf.c,v 1.371 2020/10/18 11:32:02 djm Exp $ */
+/* $OpenBSD: servconf.c,v 1.375 2021/01/26 05:32:21 dtucker Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
@@ -108,11 +108,11 @@ initialize_server_options(ServerOptions *options)
 	options->log_verbose = NULL;
 	options->hostbased_authentication = -1;
 	options->hostbased_uses_name_from_packet_only = -1;
-	options->hostbased_key_types = NULL;
+	options->hostbased_accepted_algos = NULL;
 	options->hostkeyalgorithms = NULL;
 	options->pubkey_authentication = -1;
 	options->pubkey_auth_options = -1;
-	options->pubkey_key_types = NULL;
+	options->pubkey_accepted_algos = NULL;
 	options->kerberos_authentication = -1;
 	options->kerberos_or_local_passwd = -1;
 	options->kerberos_ticket_cleanup = -1;
@@ -147,6 +147,9 @@ initialize_server_options(ServerOptions *options)
 	options->max_startups_begin = -1;
 	options->max_startups_rate = -1;
 	options->max_startups = -1;
+	options->per_source_max_startups = -1;
+	options->per_source_masklen_ipv4 = -1;
+	options->per_source_masklen_ipv6 = -1;
 	options->max_authtries = -1;
 	options->max_sessions = -1;
 	options->banner = NULL;
@@ -211,8 +214,8 @@ assemble_algorithms(ServerOptions *o)
 	ASSEMBLE(macs, def_mac, all_mac);
 	ASSEMBLE(kex_algorithms, def_kex, all_kex);
 	ASSEMBLE(hostkeyalgorithms, def_key, all_key);
-	ASSEMBLE(hostbased_key_types, def_key, all_key);
-	ASSEMBLE(pubkey_key_types, def_key, all_key);
+	ASSEMBLE(hostbased_accepted_algos, def_key, all_key);
+	ASSEMBLE(pubkey_accepted_algos, def_key, all_key);
 	ASSEMBLE(ca_sign_algorithms, def_sig, all_sig);
 #undef ASSEMBLE
 	free(all_cipher);
@@ -394,6 +397,12 @@ fill_default_server_options(ServerOptions *options)
 		options->max_startups_rate = 30;		/* 30% */
 	if (options->max_startups_begin == -1)
 		options->max_startups_begin = 10;
+	if (options->per_source_max_startups == -1)
+		options->per_source_max_startups = INT_MAX;
+	if (options->per_source_masklen_ipv4 == -1)
+		options->per_source_masklen_ipv4 = 32;
+	if (options->per_source_masklen_ipv6 == -1)
+		options->per_source_masklen_ipv6 = 128;
 	if (options->max_authtries == -1)
 		options->max_authtries = DEFAULT_AUTH_FAIL_MAX;
 	if (options->max_sessions == -1)
@@ -489,11 +498,11 @@ typedef enum {
 	sPermitUserEnvironment, sAllowTcpForwarding, sCompression,
 	sRekeyLimit, sAllowUsers, sDenyUsers, sAllowGroups, sDenyGroups,
 	sIgnoreUserKnownHosts, sCiphers, sMacs, sPidFile,
-	sGatewayPorts, sPubkeyAuthentication, sPubkeyAcceptedKeyTypes,
+	sGatewayPorts, sPubkeyAuthentication, sPubkeyAcceptedAlgorithms,
 	sXAuthLocation, sSubsystem, sMaxStartups, sMaxAuthTries, sMaxSessions,
 	sBanner, sUseDNS, sHostbasedAuthentication,
-	sHostbasedUsesNameFromPacketOnly, sHostbasedAcceptedKeyTypes,
-	sHostKeyAlgorithms,
+	sHostbasedUsesNameFromPacketOnly, sHostbasedAcceptedAlgorithms,
+	sHostKeyAlgorithms, sPerSourceMaxStartups, sPerSourceNetBlockSize,
 	sClientAliveInterval, sClientAliveCountMax, sAuthorizedKeysFile,
 	sGssAuthentication, sGssCleanupCreds, sGssStrictAcceptor,
 	sAcceptEnv, sSetEnv, sPermitTunnel,
@@ -539,11 +548,13 @@ static struct {
 	{ "rhostsrsaauthentication", sDeprecated, SSHCFG_ALL },
 	{ "hostbasedauthentication", sHostbasedAuthentication, SSHCFG_ALL },
 	{ "hostbasedusesnamefrompacketonly", sHostbasedUsesNameFromPacketOnly, SSHCFG_ALL },
-	{ "hostbasedacceptedkeytypes", sHostbasedAcceptedKeyTypes, SSHCFG_ALL },
+	{ "hostbasedacceptedkeytypes", sHostbasedAcceptedAlgorithms, SSHCFG_ALL }, /* obsolete */
+	{ "hostbasedacceptedalgorithms", sHostbasedAcceptedAlgorithms, SSHCFG_ALL },
 	{ "hostkeyalgorithms", sHostKeyAlgorithms, SSHCFG_GLOBAL },
 	{ "rsaauthentication", sDeprecated, SSHCFG_ALL },
 	{ "pubkeyauthentication", sPubkeyAuthentication, SSHCFG_ALL },
-	{ "pubkeyacceptedkeytypes", sPubkeyAcceptedKeyTypes, SSHCFG_ALL },
+	{ "pubkeyacceptedkeytypes", sPubkeyAcceptedAlgorithms, SSHCFG_ALL }, /* obsolete */
+	{ "pubkeyacceptedalgorithms", sPubkeyAcceptedAlgorithms, SSHCFG_ALL },
 	{ "pubkeyauthoptions", sPubkeyAuthOptions, SSHCFG_ALL },
 	{ "dsaauthentication", sPubkeyAuthentication, SSHCFG_GLOBAL }, /* alias */
 #ifdef KRB5
@@ -603,6 +614,8 @@ static struct {
 	{ "gatewayports", sGatewayPorts, SSHCFG_ALL },
 	{ "subsystem", sSubsystem, SSHCFG_GLOBAL },
 	{ "maxstartups", sMaxStartups, SSHCFG_GLOBAL },
+	{ "persourcemaxstartups", sPerSourceMaxStartups, SSHCFG_GLOBAL },
+	{ "persourcenetblocksize", sPerSourceNetBlockSize, SSHCFG_GLOBAL },
 	{ "maxauthtries", sMaxAuthTries, SSHCFG_ALL },
 	{ "maxsessions", sMaxSessions, SSHCFG_ALL },
 	{ "banner", sBanner, SSHCFG_ALL },
@@ -1430,9 +1443,9 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 		intptr = &options->hostbased_uses_name_from_packet_only;
 		goto parse_flag;
 
-	case sHostbasedAcceptedKeyTypes:
-		charptr = &options->hostbased_key_types;
- parse_keytypes:
+	case sHostbasedAcceptedAlgorithms:
+		charptr = &options->hostbased_accepted_algos;
+ parse_pubkey_algos:
 		arg = strdelim(&cp);
 		if (!arg || *arg == '\0')
 			fatal("%s line %d: Missing argument.",
@@ -1448,19 +1461,19 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 
 	case sHostKeyAlgorithms:
 		charptr = &options->hostkeyalgorithms;
-		goto parse_keytypes;
+		goto parse_pubkey_algos;
 
 	case sCASignatureAlgorithms:
 		charptr = &options->ca_sign_algorithms;
-		goto parse_keytypes;
+		goto parse_pubkey_algos;
 
 	case sPubkeyAuthentication:
 		intptr = &options->pubkey_authentication;
 		goto parse_flag;
 
-	case sPubkeyAcceptedKeyTypes:
-		charptr = &options->pubkey_key_types;
-		goto parse_keytypes;
+	case sPubkeyAcceptedAlgorithms:
+		charptr = &options->pubkey_accepted_algos;
+		goto parse_pubkey_algos;
 
 	case sPubkeyAuthOptions:
 		intptr = &options->pubkey_auth_options;
@@ -1831,6 +1844,45 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 			    filename, linenum);
 		else
 			options->max_startups = options->max_startups_begin;
+		break;
+
+	case sPerSourceNetBlockSize:
+		arg = strdelim(&cp);
+		if (!arg || *arg == '\0')
+			fatal("%s line %d: Missing PerSourceNetBlockSize spec.",
+			    filename, linenum);
+		switch (n = sscanf(arg, "%d:%d", &value, &value2)) {
+		case 2:
+			if (value2 < 0 || value2 > 128)
+				n = -1;
+			/* FALLTHROUGH */
+		case 1:
+			if (value < 0 || value > 32)
+				n = -1;
+		}
+		if (n != 1 && n != 2)
+			fatal("%s line %d: Invalid PerSourceNetBlockSize"
+			    " spec.", filename, linenum);
+		if (*activep) {
+			options->per_source_masklen_ipv4 = value;
+			options->per_source_masklen_ipv6 = value2;
+		}
+		break;
+
+	case sPerSourceMaxStartups:
+		arg = strdelim(&cp);
+		if (!arg || *arg == '\0')
+			fatal("%s line %d: Missing PerSourceMaxStartups spec.",
+			    filename, linenum);
+		if (strcmp(arg, "none") == 0) { /* no limit */
+			value = INT_MAX;
+		} else {
+			if ((errstr = atoi_err(arg, &value)) != NULL)
+				fatal("%s line %d: integer value %s.",
+				    filename, linenum, errstr);
+		}
+		if (*activep)
+			options->per_source_max_startups = value;
 		break;
 
 	case sMaxAuthTries:
@@ -2800,9 +2852,9 @@ dump_config(ServerOptions *o)
 	dump_cfg_string(sHostKeyAgent, o->host_key_agent);
 	dump_cfg_string(sKexAlgorithms, o->kex_algorithms);
 	dump_cfg_string(sCASignatureAlgorithms, o->ca_sign_algorithms);
-	dump_cfg_string(sHostbasedAcceptedKeyTypes, o->hostbased_key_types);
+	dump_cfg_string(sHostbasedAcceptedAlgorithms, o->hostbased_accepted_algos);
 	dump_cfg_string(sHostKeyAlgorithms, o->hostkeyalgorithms);
-	dump_cfg_string(sPubkeyAcceptedKeyTypes, o->pubkey_key_types);
+	dump_cfg_string(sPubkeyAcceptedAlgorithms, o->pubkey_accepted_algos);
 	dump_cfg_string(sRDomain, o->routing_domain);
 
 	/* string arguments requiring a lookup */
@@ -2834,6 +2886,13 @@ dump_config(ServerOptions *o)
 
 	printf("maxstartups %d:%d:%d\n", o->max_startups_begin,
 	    o->max_startups_rate, o->max_startups);
+	printf("persourcemaxstartups ");
+	if (o->per_source_max_startups == INT_MAX)
+		printf("none\n");
+	else
+		printf("%d\n", o->per_source_max_startups);
+	printf("persourcenetblocksize %d:%d\n", o->per_source_masklen_ipv4,
+	    o->per_source_masklen_ipv6);
 
 	s = NULL;
 	for (i = 0; tunmode_desc[i].val != -1; i++) {

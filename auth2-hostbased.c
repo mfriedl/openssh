@@ -1,4 +1,4 @@
-/* $OpenBSD: auth2-hostbased.c,v 1.43 2020/10/18 11:32:01 djm Exp $ */
+/* $OpenBSD: auth2-hostbased.c,v 1.46 2021/01/27 10:05:28 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
@@ -34,6 +34,7 @@
 #include "xmalloc.h"
 #include "ssh2.h"
 #include "packet.h"
+#include "kex.h"
 #include "sshbuf.h"
 #include "log.h"
 #include "misc.h"
@@ -53,8 +54,6 @@
 
 /* import */
 extern ServerOptions options;
-extern u_char *session_id2;
-extern u_int session_id2_len;
 
 static int
 userauth_hostbased(struct ssh *ssh)
@@ -107,8 +106,8 @@ userauth_hostbased(struct ssh *ssh)
 		    "signature format");
 		goto done;
 	}
-	if (match_pattern_list(pkalg, options.hostbased_key_types, 0) != 1) {
-		logit_f("key type %s not in HostbasedAcceptedKeyTypes",
+	if (match_pattern_list(pkalg, options.hostbased_accepted_algos, 0) != 1) {
+		logit_f("key type %s not in HostbasedAcceptedAlgorithms",
 		    sshkey_type(key));
 		goto done;
 	}
@@ -128,7 +127,7 @@ userauth_hostbased(struct ssh *ssh)
 	if ((b = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 	/* reconstruct packet */
-	if ((r = sshbuf_put_string(b, session_id2, session_id2_len)) != 0 ||
+	if ((r = sshbuf_put_stringb(b, ssh->kex->session_id)) != 0 ||
 	    (r = sshbuf_put_u8(b, SSH2_MSG_USERAUTH_REQUEST)) != 0 ||
 	    (r = sshbuf_put_cstring(b, authctxt->user)) != 0 ||
 	    (r = sshbuf_put_cstring(b, authctxt->service)) != 0 ||
@@ -213,7 +212,7 @@ hostbased_key_allowed(struct ssh *ssh, struct passwd *pw,
 	debug2_f("access allowed by auth_rhosts2");
 
 	if (sshkey_is_cert(key) &&
-	    sshkey_cert_check_authority(key, 1, 0, lookup, &reason)) {
+	    sshkey_cert_check_authority(key, 1, 0, 0, lookup, &reason)) {
 		error("%s", reason);
 		auth_debug_add("%s", reason);
 		return 0;

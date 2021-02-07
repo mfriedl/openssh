@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.c,v 1.157 2020/12/22 00:12:22 djm Exp $ */
+/* $OpenBSD: misc.c,v 1.160 2021/01/15 02:58:11 dtucker Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2005-2020 Damien Miller.  All rights reserved.
@@ -259,10 +259,10 @@ waitfd(int fd, int *timeoutp, short events)
 	struct timeval t_start;
 	int oerrno, r;
 
-	monotime_tv(&t_start);
 	pfd.fd = fd;
 	pfd.events = events;
 	for (; *timeoutp >= 0;) {
+		monotime_tv(&t_start);
 		r = poll(&pfd, 1, *timeoutp);
 		oerrno = errno;
 		ms_subtract_diff(&t_start, timeoutp);
@@ -497,7 +497,7 @@ a2tun(const char *s, int *remote)
  *
  * Return -1 if time string is invalid.
  */
-long
+int
 convtime(const char *s)
 {
 	long total, secs, multiplier;
@@ -514,7 +514,7 @@ convtime(const char *s)
 	while (*p) {
 		secs = strtol(p, &endp, 10);
 		if (p == endp ||
-		    (errno == ERANGE && (secs == LONG_MIN || secs == LONG_MAX)) ||
+		    (errno == ERANGE && (secs == INT_MIN || secs == INT_MAX)) ||
 		    secs < 0)
 			return -1;
 
@@ -545,10 +545,10 @@ convtime(const char *s)
 		default:
 			return -1;
 		}
-		if (secs >= LONG_MAX / multiplier)
+		if (secs > INT_MAX / multiplier)
 			return -1;
 		secs *= multiplier;
-		if  (total >= LONG_MAX - secs)
+		if  (total > INT_MAX - secs)
 			return -1;
 		total += secs;
 		if (total < 0)

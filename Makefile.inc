@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.85 2020/10/16 13:24:45 djm Exp $
+#	$OpenBSD: Makefile.inc,v 1.87 2021/01/09 11:58:50 dtucker Exp $
 
 .include <bsd.own.mk>
 
@@ -55,6 +55,7 @@ SRCS_BASE+=	ssherr.c
 SRCS_BASE+=	log.c
 SRCS_BASE+=	xmalloc.c
 SRCS_BASE+=	misc.c
+SRCS_BASE+=	addr.c
 SRCS_BASE+=	addrmatch.c
 SRCS_BASE+=	match.c
 
@@ -69,8 +70,8 @@ SRCS_KEXS+=	kexgexs.c
 SRCS_KEX+=	kexc25519.c
 SRCS_KEX+=	smult_curve25519_ref.c
 SRCS_KEX+=	kexgen.c
-SRCS_KEX+=	kexsntrup4591761x25519.c
-SRCS_KEX+=	sntrup4591761.c
+SRCS_KEX+=	kexsntrup761x25519.c
+SRCS_KEX+=	sntrup761.c
 
 SRCS_KEY+=	sshkey.c
 SRCS_KEY+=	cipher.c
