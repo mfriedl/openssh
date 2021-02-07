@@ -1,5 +1,5 @@
 
-/* $OpenBSD: servconf.c,v 1.375 2021/01/26 05:32:21 dtucker Exp $ */
+/* $OpenBSD: servconf.c,v 1.376 2021/02/15 20:36:35 markus Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
