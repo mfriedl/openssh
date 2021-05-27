@@ -488,6 +488,8 @@ resolve_canonicalize(char **hostp, int port)
 	}
 	/* Attempt each supplied suffix */
 	for (i = 0; i < options.num_canonical_domains; i++) {
+		if (strcasecmp(options.canonical_domains[i], "none") == 0)
+			break;
 		xasprintf(&fullhost, "%s.%s.", *hostp,
 		    options.canonical_domains[i]);
 		debug3_f("attempting \"%s\" => \"%s\"", *hostp, fullhost);
@@ -1314,8 +1316,11 @@ main(int ac, char **av)
 
 	/* reinit */
 	log_init(argv0, options.log_level, options.log_facility, !use_syslog);
-	for (j = 0; j < options.num_log_verbose; j++)
+	for (j = 0; j < options.num_log_verbose; j++) {
+		if (strcasecmp(options.log_verbose[j], "none") == 0)
+			break;
 		log_verbose_add(options.log_verbose[j]);
+	}
 
 	if (options.request_tty == REQUEST_TTY_YES ||
 	    options.request_tty == REQUEST_TTY_FORCE)

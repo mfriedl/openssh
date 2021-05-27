@@ -174,7 +174,7 @@ void mktemp_proto(char *, size_t);
 void	 child_set_env(char ***envp, u_int *envsizep, const char *name,
 	     const char *value);
 
-int	 argv_split(const char *, int *, char ***);
+int	 argv_split(const char *, int *, char ***, int);
 char	*argv_assemble(int, char **argv);
 int	 exited_cleanly(pid_t, const char *, const char *, int);
 

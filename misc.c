@@ -1823,14 +1823,13 @@ daemonized(void)
 	return 1;
 }
 
-
 /*
  * Splits 's' into an argument vector. Handles quoted string and basic
  * escape characters (\\, \", \'). Caller must free the argument vector
  * and its members.
  */
 int
-argv_split(const char *s, int *argcp, char ***argvp)
+argv_split(const char *s, int *argcp, char ***argvp, int terminate_on_comment)
 {
 	int r = SSH_ERR_INTERNAL_ERROR;
 	int argc = 0, quote, i, j;
@@ -1843,7 +1842,8 @@ argv_split(const char *s, int *argcp, char ***argvp)
 		/* Skip leading whitespace */
 		if (s[i] == ' ' || s[i] == '\t')
 			continue;
-
+		if (terminate_on_comment && s[i] == '#')
+			break;
 		/* Start of a token */
 		quote = 0;
 		if (s[i] == '\\' &&
@@ -1861,7 +1861,8 @@ argv_split(const char *s, int *argcp, char ***argvp)
 			if (s[i] == '\\') {
 				if (s[i + 1] == '\'' ||
 				    s[i + 1] == '\"' ||
-				    s[i + 1] == '\\') {
+				    s[i + 1] == '\\' ||
+				    (quote == 0 && s[i + 1] == ' ')) {
 					i++; /* Skip '\' */
 					arg[j++] = s[i];
 				} else {

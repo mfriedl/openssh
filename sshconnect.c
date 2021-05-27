@@ -825,7 +825,7 @@ load_hostkeys_command(struct hostkeys *hostkeys, const char *command_template,
 	osigchld = ssh_signal(SIGCHLD, SIG_DFL);
 
 	/* Turn the command into an argument vector */
-	if (argv_split(command_template, &ac, &av) != 0) {
+	if (argv_split(command_template, &ac, &av, 0) != 0) {
 		error("%s \"%s\" contains invalid quotes", tag,
 		   command_template);
 		goto out;
