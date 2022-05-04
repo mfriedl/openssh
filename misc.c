@@ -1,4 +1,4 @@
-/* $OpenBSD: misc.c,v 1.168 2021/07/12 06:22:57 dtucker Exp $ */
+/* $OpenBSD: misc.c,v 1.175 2022/03/20 08:51:21 djm Exp $ */
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  * Copyright (c) 2005-2020 Damien Miller.  All rights reserved.
@@ -672,10 +672,16 @@ hpdelim2(char **cp, char *delim)
 	return old;
 }
 
+/* The common case: only accept colon as delimiter. */
 char *
 hpdelim(char **cp)
 {
-	return hpdelim2(cp, NULL);
+	char *r, delim = '\0';
+
+	r =  hpdelim2(cp, &delim);
+	if (delim == '/')
+		return NULL;
+	return r;
 }
 
 char *
@@ -1016,16 +1022,21 @@ addargs(arglist *args, char *fmt, ...)
 	r = vasprintf(&cp, fmt, ap);
 	va_end(ap);
 	if (r == -1)
-		fatal("addargs: argument too long");
+		fatal_f("argument too long");
 
 	nalloc = args->nalloc;
 	if (args->list == NULL) {
 		nalloc = 32;
 		args->num = 0;
-	} else if (args->num+2 >= nalloc)
+	} else if (args->num > (256 * 1024))
+		fatal_f("too many arguments");
+	else if (args->num >= args->nalloc)
+		fatal_f("arglist corrupt");
+	else if (args->num+2 >= nalloc)
 		nalloc *= 2;
 
-	args->list = xrecallocarray(args->list, args->nalloc, nalloc, sizeof(char *));
+	args->list = xrecallocarray(args->list, args->nalloc,
+	    nalloc, sizeof(char *));
 	args->nalloc = nalloc;
 	args->list[args->num++] = cp;
 	args->list[args->num] = NULL;
@@ -1042,10 +1053,12 @@ replacearg(arglist *args, u_int which, char *fmt, ...)
 	r = vasprintf(&cp, fmt, ap);
 	va_end(ap);
 	if (r == -1)
-		fatal("replacearg: argument too long");
+		fatal_f("argument too long");
+	if (args->list == NULL || args->num >= args->nalloc)
+		fatal_f("arglist corrupt");
 
 	if (which >= args->num)
-		fatal("replacearg: tried to replace invalid arg %d >= %d",
+		fatal_f("tried to replace invalid arg %d >= %d",
 		    which, args->num);
 	free(args->list[which]);
 	args->list[which] = cp;
@@ -1056,58 +1069,97 @@ freeargs(arglist *args)
 {
 	u_int i;
 
-	if (args->list != NULL) {
+	if (args == NULL)
+		return;
+	if (args->list != NULL && args->num < args->nalloc) {
 		for (i = 0; i < args->num; i++)
 			free(args->list[i]);
 		free(args->list);
-		args->nalloc = args->num = 0;
-		args->list = NULL;
 	}
+	args->nalloc = args->num = 0;
+	args->list = NULL;
 }
 
 /*
  * Expands tildes in the file name.  Returns data allocated by xmalloc.
  * Warning: this calls getpw*.
  */
+int
+tilde_expand(const char *filename, uid_t uid, char **retp)
+{
+	char *ocopy = NULL, *copy, *s = NULL;
+	const char *path = NULL, *user = NULL;
+	struct passwd *pw;
+	size_t len;
+	int ret = -1, r, slash;
+
+	*retp = NULL;
+	if (*filename != '~') {
+		*retp = xstrdup(filename);
+		return 0;
+	}
+	ocopy = copy = xstrdup(filename + 1);
+
+	if (*copy == '\0')				/* ~ */
+		path = NULL;
+	else if (*copy == '/') {
+		copy += strspn(copy, "/");
+		if (*copy == '\0')
+			path = NULL;			/* ~/ */
+		else
+			path = copy;			/* ~/path */
+	} else {
+		user = copy;
+		if ((path = strchr(copy, '/')) != NULL) {
+			copy[path - copy] = '\0';
+			path++;
+			path += strspn(path, "/");
+			if (*path == '\0')		/* ~user/ */
+				path = NULL;
+			/* else				 ~user/path */
+		}
+		/* else					~user */
+	}
+	if (user != NULL) {
+		if ((pw = getpwnam(user)) == NULL) {
+			error_f("No such user %s", user);
+			goto out;
+		}
+	} else if ((pw = getpwuid(uid)) == NULL) {
+		error_f("No such uid %ld", (long)uid);
+		goto out;
+	}
+
+	/* Make sure directory has a trailing '/' */
+	slash = (len = strlen(pw->pw_dir)) == 0 || pw->pw_dir[len - 1] != '/';
+
+	if ((r = xasprintf(&s, "%s%s%s", pw->pw_dir,
+	    slash ? "/" : "", path != NULL ? path : "")) <= 0) {
+		error_f("xasprintf failed");
+		goto out;
+	}
+	if (r >= PATH_MAX) {
+		error_f("Path too long");
+		goto out;
+	}
+	/* success */
+	ret = 0;
+	*retp = s;
+	s = NULL;
+ out:
+	free(s);
+	free(ocopy);
+	return ret;
+}
+
 char *
 tilde_expand_filename(const char *filename, uid_t uid)
 {
-	const char *path, *sep;
-	char user[128], *ret;
-	struct passwd *pw;
-	u_int len, slash;
+	char *ret;
 
-	if (*filename != '~')
-		return (xstrdup(filename));
-	filename++;
-
-	path = strchr(filename, '/');
-	if (path != NULL && path > filename) {		/* ~user/path */
-		slash = path - filename;
-		if (slash > sizeof(user) - 1)
-			fatal("tilde_expand_filename: ~username too long");
-		memcpy(user, filename, slash);
-		user[slash] = '\0';
-		if ((pw = getpwnam(user)) == NULL)
-			fatal("tilde_expand_filename: No such user %s", user);
-	} else if ((pw = getpwuid(uid)) == NULL)	/* ~/path */
-		fatal("tilde_expand_filename: No such uid %ld", (long)uid);
-
-	/* Make sure directory has a trailing '/' */
-	len = strlen(pw->pw_dir);
-	if (len == 0 || pw->pw_dir[len - 1] != '/')
-		sep = "/";
-	else
-		sep = "";
-
-	/* Skip leading '/' from specified path */
-	if (path != NULL)
-		filename = path + 1;
-
-	if (xasprintf(&ret, "%s%s%s", pw->pw_dir, sep, filename) >= PATH_MAX)
-		fatal("tilde_expand_filename: Path too long");
-
-	return (ret);
+	if (tilde_expand(filename, uid, &ret) != 0)
+		cleanup_exit(255);
+	return ret;
 }
 
 /*
@@ -1541,12 +1593,12 @@ ms_subtract_diff(struct timeval *start, int *ms)
 }
 
 void
-ms_to_timeval(struct timeval *tv, int ms)
+ms_to_timespec(struct timespec *ts, int ms)
 {
 	if (ms < 0)
 		ms = 0;
-	tv->tv_sec = ms / 1000;
-	tv->tv_usec = (ms % 1000) * 1000;
+	ts->tv_sec = ms / 1000;
+	ts->tv_nsec = (ms % 1000) * 1000 * 1000;
 }
 
 void
@@ -2573,6 +2625,12 @@ subprocess(const char *tag, const char *command,
 		}
 		closefrom(STDERR_FILENO + 1);
 
+		if (geteuid() == 0 &&
+		    initgroups(pw->pw_name, pw->pw_gid) == -1) {
+			error("%s: initgroups(%s, %u): %s", tag,
+			    pw->pw_name, (u_int)pw->pw_gid, strerror(errno));
+			_exit(1);
+		}
 		if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) == -1) {
 			error("%s: setresgid %u: %s", tag, (u_int)pw->pw_gid,
 			    strerror(errno));

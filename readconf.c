@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.361 2021/07/23 04:04:52 djm Exp $ */
+/* $OpenBSD: readconf.c,v 1.367 2022/04/20 15:56:49 millert Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -740,19 +740,15 @@ static void
 rm_env(Options *options, const char *arg, const char *filename, int linenum)
 {
 	int i, j, onum_send_env = options->num_send_env;
-	char *cp;
 
 	/* Remove an environment variable */
 	for (i = 0; i < options->num_send_env; ) {
-		cp = xstrdup(options->send_env[i]);
-		if (!match_pattern(cp, arg + 1)) {
-			free(cp);
+		if (!match_pattern(options->send_env[i], arg + 1)) {
 			i++;
 			continue;
 		}
 		debug3("%s line %d: removing environment %s",
-		    filename, linenum, cp);
-		free(cp);
+		    filename, linenum, options->send_env[i]);
 		free(options->send_env[i]);
 		options->send_env[i] = NULL;
 		for (j = i; j < options->num_send_env - 1; j++) {
@@ -876,6 +872,15 @@ static const struct multistate multistate_canonicalizehostname[] = {
 	{ "always",			SSH_CANONICALISE_ALWAYS },
 	{ NULL, -1 }
 };
+static const struct multistate multistate_pubkey_auth[] = {
+	{ "true",			SSH_PUBKEY_AUTH_ALL },
+	{ "false",			SSH_PUBKEY_AUTH_NO },
+	{ "yes",			SSH_PUBKEY_AUTH_ALL },
+	{ "no",				SSH_PUBKEY_AUTH_NO },
+	{ "unbound",			SSH_PUBKEY_AUTH_UNBOUND },
+	{ "host-bound",			SSH_PUBKEY_AUTH_HBOUND },
+	{ NULL, -1 }
+};
 static const struct multistate multistate_compression[] = {
 #ifdef WITH_ZLIB
 	{ "yes",			COMP_ZLIB },
@@ -920,7 +925,7 @@ process_config_line_depth(Options *options, struct passwd *pw, const char *host,
     const char *original_host, char *line, const char *filename,
     int linenum, int *activep, int flags, int *want_final_pass, int depth)
 {
-	char *str, **charptr, *endofnumber, *keyword, *arg, *arg2, *p, ch;
+	char *str, **charptr, *endofnumber, *keyword, *arg, *arg2, *p;
 	char **cpptr, ***cppptr, fwdarg[256];
 	u_int i, *uintptr, uvalue, max_entries = 0;
 	int r, oactive, negated, opcode, *intptr, value, value2, cmdline = 0;
@@ -1088,8 +1093,9 @@ parse_time:
 		goto parse_string;
 
 	case oPubkeyAuthentication:
+		multistate_ptr = multistate_pubkey_auth;
 		intptr = &options->pubkey_authentication;
-		goto parse_flag;
+		goto parse_multistate;
 
 	case oHostbasedAuthentication:
 		intptr = &options->hostbased_authentication;
@@ -1560,9 +1566,8 @@ parse_pubkey_algos:
 		}
 		while ((arg = argv_next(&ac, &av)) != NULL) {
 			arg2 = xstrdup(arg);
-			ch = '\0';
-			p = hpdelim2(&arg, &ch);
-			if (p == NULL || ch == '/') {
+			p = hpdelim(&arg);
+			if (p == NULL) {
 				fatal("%s line %d: missing host in %s",
 				    filename, linenum,
 				    lookup_opcode_name(opcode));
@@ -1997,11 +2002,23 @@ parse_pubkey_algos:
 
 	case oCanonicalizePermittedCNAMEs:
 		value = options->num_permitted_cnames != 0;
+		i = 0;
 		while ((arg = argv_next(&ac, &av)) != NULL) {
-			/* Either '*' for everything or 'list:list' */
-			if (strcmp(arg, "*") == 0)
+			/*
+			 * Either 'none' (only in first position), '*' for
+			 * everything or 'list:list'
+			 */
+			if (strcasecmp(arg, "none") == 0) {
+				if (i > 0 || ac > 0) {
+					error("%s line %d: keyword %s \"none\" "
+					    "argument must appear alone.",
+					    filename, linenum, keyword);
+					goto out;
+				}
+				arg2 = "";
+			} else if (strcmp(arg, "*") == 0) {
 				arg2 = arg;
-			else {
+			} else {
 				lowercase(arg);
 				if ((arg2 = strchr(arg, ':')) == NULL ||
 				    arg2[1] == '\0') {
@@ -2013,6 +2030,7 @@ parse_pubkey_algos:
 				*arg2 = '\0';
 				arg2++;
 			}
+			i++;
 			if (!*activep || value)
 				continue;
 			if (options->num_permitted_cnames >=
@@ -2267,6 +2285,20 @@ option_clear_or_none(const char *o)
 }
 
 /*
+ * Returns 1 if CanonicalizePermittedCNAMEs have been specified, 0 otherwise.
+ * Allowed to be called on non-final configuration.
+ */
+int
+config_has_permitted_cnames(Options *options)
+{
+	if (options->num_permitted_cnames == 1 &&
+	    strcasecmp(options->permitted_cnames[0].source_list, "none") == 0 &&
+	    strcmp(options->permitted_cnames[0].target_list, "") == 0)
+		return 0;
+	return options->num_permitted_cnames > 0;
+}
+
+/*
  * Initializes options to special values that indicate that they have not yet
  * been set.  Read_config_file will only set options with this value. Options
  * are processed in the following order: command line, user config file,
@@ -2446,7 +2478,7 @@ fill_default_options(Options * options)
 	if (options->fwd_opts.streamlocal_bind_unlink == -1)
 		options->fwd_opts.streamlocal_bind_unlink = 0;
 	if (options->pubkey_authentication == -1)
-		options->pubkey_authentication = 1;
+		options->pubkey_authentication = SSH_PUBKEY_AUTH_ALL;
 	if (options->gss_authentication == -1)
 		options->gss_authentication = 0;
 	if (options->gss_deleg_creds == -1)
@@ -2482,7 +2514,6 @@ fill_default_options(Options * options)
 	}
 	if (options->num_identity_files == 0) {
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_RSA, 0);
-		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_DSA, 0);
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_ECDSA, 0);
 		add_identity_file(options, "~/",
 		    _PATH_SSH_CLIENT_ID_ECDSA_SK, 0);
@@ -2491,6 +2522,7 @@ fill_default_options(Options * options)
 		add_identity_file(options, "~/",
 		    _PATH_SSH_CLIENT_ID_ED25519_SK, 0);
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_XMSS, 0);
+		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_DSA, 0);
 	}
 	if (options->escape_char == -1)
 		options->escape_char = '~';
@@ -2626,6 +2658,15 @@ fill_default_options(Options * options)
 	    options->jump_port == 0 && options->jump_user == NULL) {
 		free(options->jump_host);
 		options->jump_host = NULL;
+	}
+	if (options->num_permitted_cnames == 1 &&
+	    !config_has_permitted_cnames(options)) {
+		/* clean up CanonicalizePermittedCNAMEs=none */
+		free(options->permitted_cnames[0].source_list);
+		free(options->permitted_cnames[0].target_list);
+		memset(options->permitted_cnames, '\0',
+		    sizeof(*options->permitted_cnames));
+		options->num_permitted_cnames = 0;
 	}
 	/* options->identity_agent distinguishes NULL from 'none' */
 	/* options->user will be set in the main program if appropriate */
@@ -3080,6 +3121,8 @@ fmt_intarg(OpCodes code, int val)
 		return fmt_multistate_int(val, multistate_canonicalizehostname);
 	case oAddKeysToAgent:
 		return fmt_multistate_int(val, multistate_yesnoaskconfirm);
+	case oPubkeyAuthentication:
+		return fmt_multistate_int(val, multistate_pubkey_auth);
 	case oFingerprintHash:
 		return ssh_digest_alg_name(val);
 	default:
@@ -3342,14 +3385,14 @@ dump_client_config(Options *o, const char *host)
 	printf("\n");
 
 	/* oCanonicalizePermittedCNAMEs */
-	if ( o->num_permitted_cnames > 0) {
-		printf("canonicalizePermittedcnames");
-		for (i = 0; i < o->num_permitted_cnames; i++) {
-			printf(" %s:%s", o->permitted_cnames[i].source_list,
-			    o->permitted_cnames[i].target_list);
-		}
-		printf("\n");
+	printf("canonicalizePermittedcnames");
+	if (o->num_permitted_cnames == 0)
+		printf(" none");
+	for (i = 0; i < o->num_permitted_cnames; i++) {
+		printf(" %s:%s", o->permitted_cnames[i].source_list,
+		    o->permitted_cnames[i].target_list);
 	}
+	printf("\n");
 
 	/* oControlPersist */
 	if (o->control_persist == 0 || o->control_persist_timeout == 0)

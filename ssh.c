@@ -1,4 +1,4 @@
-/* $OpenBSD: ssh.c,v 1.565 2021/07/23 05:24:02 djm Exp $ */
+/* $OpenBSD: ssh.c,v 1.574 2022/03/30 04:33:09 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -169,7 +169,7 @@ usage(void)
 "           [-i identity_file] [-J [user@]host[:port]] [-L address]\n"
 "           [-l login_name] [-m mac_spec] [-O ctl_cmd] [-o option] [-p port]\n"
 "           [-Q query_option] [-R address] [-S ctl_path] [-W host:port]\n"
-"           [-w local_tun[:remote_tun]] destination [command]\n"
+"           [-w local_tun[:remote_tun]] destination [command [argument ...]]\n"
 	);
 	exit(255);
 }
@@ -243,6 +243,7 @@ resolve_host(const char *name, int port, int logerr, char *cname, size_t clen)
 		port = default_ssh_port();
 	if (cname != NULL)
 		*cname = '\0';
+	debug3_f("lookup %s:%d", name, port);
 
 	snprintf(strport, sizeof strport, "%d", port);
 	memset(&hints, 0, sizeof(hints));
@@ -366,7 +367,7 @@ check_follow_cname(int direct, char **namep, const char *cname)
 	int i;
 	struct allowed_cname *rule;
 
-	if (*cname == '\0' || options.num_permitted_cnames == 0 ||
+	if (*cname == '\0' || !config_has_permitted_cnames(&options) ||
 	    strcmp(*namep, cname) == 0)
 		return 0;
 	if (options.canonicalize_hostname == SSH_CANONICALISE_NO)
@@ -669,7 +670,7 @@ main(int ac, char **av)
 
  again:
 	while ((opt = getopt(ac, av, "1246ab:c:e:fgi:kl:m:no:p:qstvx"
-	    "AB:CD:E:F:GI:J:KL:MNO:PQ:R:S:TVw:W:XYy")) != -1) {
+	    "AB:CD:E:F:GI:J:KL:MNO:PQ:R:S:TVw:W:XYy")) != -1) { /* HUZdhjruz */
 		switch (opt) {
 		case '1':
 			fatal("SSH protocol v.1 is no longer supported");
@@ -1165,7 +1166,7 @@ main(int ac, char **av)
 	 */
 	direct = option_clear_or_none(options.proxy_command) &&
 	    options.jump_host == NULL;
-	if (addrs == NULL && options.num_permitted_cnames != 0 && (direct ||
+	if (addrs == NULL && config_has_permitted_cnames(&options) && (direct ||
 	    options.canonicalize_hostname == SSH_CANONICALISE_ALWAYS)) {
 		if ((addrs = resolve_host(host, options.port,
 		    direct, cname, sizeof(cname))) == NULL) {
@@ -1250,7 +1251,7 @@ main(int ac, char **av)
 		    /* Optional additional jump hosts ",..." */
 		    options.jump_extra == NULL ? "" : " -J ",
 		    options.jump_extra == NULL ? "" : options.jump_extra,
-		    /* Optional "-F" argumment if -F specified */
+		    /* Optional "-F" argument if -F specified */
 		    config == NULL ? "" : " -F ",
 		    config == NULL ? "" : config,
 		    /* Optional "-v" arguments if -v set */
@@ -1320,7 +1321,8 @@ main(int ac, char **av)
 
 	/* Force no tty */
 	if (options.request_tty == REQUEST_TTY_NO ||
-	    (muxclient_command && muxclient_command != SSHMUX_COMMAND_PROXY))
+	    (muxclient_command && muxclient_command != SSHMUX_COMMAND_PROXY) ||
+	    options.session_type == SESSION_TYPE_NONE)
 		tty_flag = 0;
 	/* Do not allocate a tty if stdin is not a tty. */
 	if ((!isatty(fileno(stdin)) || options.stdin_null) &&
@@ -1554,11 +1556,17 @@ main(int ac, char **av)
 		fatal_f("pubkey out of array bounds"); \
 	check_load(sshkey_load_public(p, &(sensitive_data.keys[o]), NULL), \
 	    p, "pubkey"); \
+	if (sensitive_data.keys[o] != NULL) \
+		debug2("hostbased key %d: %s key from \"%s\"", o, \
+		    sshkey_ssh_name(sensitive_data.keys[o]), p); \
 } while (0)
 #define L_CERT(p,o) do { \
 	if ((o) >= sensitive_data.nkeys) \
 		fatal_f("cert out of array bounds"); \
 	check_load(sshkey_load_cert(p, &(sensitive_data.keys[o])), p, "cert"); \
+	if (sensitive_data.keys[o] != NULL) \
+		debug2("hostbased key %d: %s cert from \"%s\"", o, \
+		    sshkey_ssh_name(sensitive_data.keys[o]), p); \
 } while (0)
 
 		if (options.hostbased_authentication == 1) {
@@ -1609,7 +1617,7 @@ main(int ac, char **av)
 				fatal("Invalid ForwardAgent environment variable name %s", cp);
 			}
 			if ((p = getenv(cp + 1)) != NULL)
-				forward_agent_sock_path = p;
+				forward_agent_sock_path = xstrdup(p);
 			else
 				options.forward_agent = 0;
 			free(cp);
@@ -1771,7 +1779,8 @@ ssh_confirm_remote_forward(struct ssh *ssh, int type, u_int32_t seq, void *ctxt)
 				rfwd->allocated_port = (int)port;
 				logit("Allocated port %u for remote "
 				    "forward to %s:%d",
-				    rfwd->allocated_port, rfwd->connect_host,
+				    rfwd->allocated_port, rfwd->connect_path ?
+				    rfwd->connect_path : rfwd->connect_host,
 				    rfwd->connect_port);
 				channel_update_permission(ssh,
 				    rfwd->handle, rfwd->allocated_port);
@@ -1857,7 +1866,7 @@ ssh_init_forward_permissions(struct ssh *ssh, const char *what, char **opens,
 {
 	u_int i;
 	int port;
-	char *addr, *arg, *oarg, ch;
+	char *addr, *arg, *oarg;
 	int where = FORWARD_LOCAL;
 
 	channel_clear_permission(ssh, FORWARD_ADM, where);
@@ -1874,9 +1883,8 @@ ssh_init_forward_permissions(struct ssh *ssh, const char *what, char **opens,
 	/* Otherwise treat it as a list of permitted host:port */
 	for (i = 0; i < num_opens; i++) {
 		oarg = arg = xstrdup(opens[i]);
-		ch = '\0';
-		addr = hpdelim2(&arg, &ch);
-		if (addr == NULL || ch == '/')
+		addr = hpdelim(&arg);
+		if (addr == NULL)
 			fatal_f("missing host in %s", what);
 		addr = cleanhostname(addr);
 		if (arg == NULL || ((port = permitopen_port(arg)) < 0))

@@ -1,4 +1,4 @@
-/* $OpenBSD: session.c,v 1.328 2021/04/03 06:18:41 djm Exp $ */
+/* $OpenBSD: session.c,v 1.330 2022/02/08 08:59:12 dtucker Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
@@ -290,7 +290,7 @@ set_fwdpermit_from_authopts(struct ssh *ssh, const struct sshauthopt *opts)
 		for (i = 0; i < auth_opts->npermitopen; i++) {
 			tmp = cp = xstrdup(auth_opts->permitopen[i]);
 			/* This shouldn't fail as it has already been checked */
-			if ((host = hpdelim(&cp)) == NULL)
+			if ((host = hpdelim2(&cp, NULL)) == NULL)
 				fatal_f("internal error: hpdelim");
 			host = cleanhostname(host);
 			if (cp == NULL || (port = permitopen_port(cp)) < 0)
@@ -1464,12 +1464,11 @@ session_dump(void)
 	for (i = 0; i < sessions_nalloc; i++) {
 		Session *s = &sessions[i];
 
-		debug("dump: used %d next_unused %d session %d %p "
+		debug("dump: used %d next_unused %d session %d "
 		    "channel %d pid %ld",
 		    s->used,
 		    s->next_unused,
 		    s->self,
-		    s,
 		    s->chanid,
 		    (long)s->pid);
 	}

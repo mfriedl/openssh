@@ -1,4 +1,4 @@
-/* $OpenBSD: sftp.c,v 1.209 2021/04/03 06:58:30 djm Exp $ */
+/* $OpenBSD: sftp.c,v 1.214 2022/03/31 03:07:03 djm Exp $ */
 /*
  * Copyright (c) 2001-2004 Damien Miller <djm@openbsd.org>
  *
@@ -116,6 +116,7 @@ enum sftp_command {
 	I_CHGRP,
 	I_CHMOD,
 	I_CHOWN,
+	I_COPY,
 	I_DF,
 	I_GET,
 	I_HELP,
@@ -159,6 +160,8 @@ static const struct CMD cmds[] = {
 	{ "chgrp",	I_CHGRP,	REMOTE	},
 	{ "chmod",	I_CHMOD,	REMOTE	},
 	{ "chown",	I_CHOWN,	REMOTE	},
+	{ "copy",	I_COPY,		REMOTE	},
+	{ "cp",		I_COPY,		REMOTE	},
 	{ "df",		I_DF,		REMOTE	},
 	{ "dir",	I_LS,		REMOTE	},
 	{ "exit",	I_QUIT,		NOARGS	},
@@ -230,6 +233,13 @@ cmd_interrupt(int signo)
 	errno = olderrno;
 }
 
+/* ARGSUSED */
+static void
+read_interrupt(int signo)
+{
+	interrupted = 1;
+}
+
 /*ARGSUSED*/
 static void
 sigchld_handler(int sig)
@@ -258,6 +268,8 @@ help(void)
 	    "chgrp [-h] grp path                Change group of file 'path' to 'grp'\n"
 	    "chmod [-h] mode path               Change permissions of file 'path' to 'mode'\n"
 	    "chown [-h] own path                Change owner of file 'path' to 'own'\n"
+	    "copy oldpath newpath               Copy remote file\n"
+	    "cp oldpath newpath                 Copy remote file\n"
 	    "df [-hi] [path]                    Display statistics for current directory or\n"
 	    "                                   filesystem containing 'path'\n"
 	    "exit                               Quit sftp\n"
@@ -633,10 +645,11 @@ process_get(struct sftp_conn *conn, const char *src, const char *dst,
 		else if (!quiet && !resume)
 			mprintf("Fetching %s to %s\n",
 			    g.gl_pathv[i], abs_dst);
+		/* XXX follow link flag */
 		if (globpath_is_dir(g.gl_pathv[i]) && (rflag || global_rflag)) {
 			if (download_dir(conn, g.gl_pathv[i], abs_dst, NULL,
 			    pflag || global_pflag, 1, resume,
-			    fflag || global_fflag) == -1)
+			    fflag || global_fflag, 0) == -1)
 				err = -1;
 		} else {
 			if (do_download(conn, g.gl_pathv[i], abs_dst, NULL,
@@ -726,10 +739,11 @@ process_put(struct sftp_conn *conn, const char *src, const char *dst,
 		else if (!quiet && !resume)
 			mprintf("Uploading %s to %s\n",
 			    g.gl_pathv[i], abs_dst);
+		/* XXX follow_link_flag */
 		if (globpath_is_dir(g.gl_pathv[i]) && (rflag || global_rflag)) {
 			if (upload_dir(conn, g.gl_pathv[i], abs_dst,
 			    pflag || global_pflag, 1, resume,
-			    fflag || global_fflag) == -1)
+			    fflag || global_fflag, 0) == -1)
 				err = -1;
 		} else {
 			if (do_upload(conn, g.gl_pathv[i], abs_dst,
@@ -1333,6 +1347,10 @@ parse_args(const char **cpp, int *ignore_errors, int *disable_echo, int *aflag,
 		if ((optidx = parse_link_flags(cmd, argv, argc, sflag)) == -1)
 			return -1;
 		goto parse_two_paths;
+	case I_COPY:
+		if ((optidx = parse_no_flags(cmd, argv, argc)) == -1)
+			return -1;
+		goto parse_two_paths;
 	case I_RENAME:
 		if ((optidx = parse_rename_flags(cmd, argv, argc, lflag)) == -1)
 			return -1;
@@ -1499,6 +1517,11 @@ parse_dispatch_command(struct sftp_conn *conn, const char *cmd, char **pwd,
 	case I_PUT:
 		err = process_put(conn, path1, path2, *pwd, pflag,
 		    rflag, aflag, fflag);
+		break;
+	case I_COPY:
+		path1 = make_absolute(path1, *pwd);
+		path2 = make_absolute(path2, *pwd);
+		err = do_copy(conn, path1, path2);
 		break;
 	case I_RENAME:
 		path1 = make_absolute(path1, *pwd);
@@ -2163,23 +2186,34 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	interactive = !batchmode && isatty(STDIN_FILENO);
 	err = 0;
 	for (;;) {
+		struct sigaction sa;
 		const char *line;
 		int count = 0;
 
-		ssh_signal(SIGINT, SIG_IGN);
-
+		interrupted = 0;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = interactive ? read_interrupt : killchild;
+		if (sigaction(SIGINT, &sa, NULL) == -1) {
+			debug3("sigaction(%s): %s", strsignal(SIGINT),
+			    strerror(errno));
+			break;
+		}
 		if (el == NULL) {
 			if (interactive)
 				printf("sftp> ");
 			if (fgets(cmd, sizeof(cmd), infile) == NULL) {
 				if (interactive)
 					printf("\n");
+				if (interrupted)
+					continue;
 				break;
 			}
 		} else {
 			if ((line = el_gets(el, &count)) == NULL ||
 			    count <= 0) {
 				printf("\n");
+				if (interrupted)
+					continue;
 				break;
 			}
 			history(hl, &hev, H_ENTER, line);
@@ -2215,9 +2249,7 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 static void
 connect_to_server(char *path, char **args, int *in, int *out)
 {
-	int c_in, c_out;
-
-	int inout[2];
+	int c_in, c_out, inout[2];
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, inout) == -1)
 		fatal("socketpair: %s", strerror(errno));

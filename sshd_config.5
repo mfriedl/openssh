@@ -33,8 +33,8 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $OpenBSD: sshd_config.5,v 1.333 2021/07/27 14:28:46 jmc Exp $
-.Dd $Mdocdate: July 27 2021 $
+.\" $OpenBSD: sshd_config.5,v 1.341 2022/04/12 05:09:49 dtucker Exp $
+.Dd $Mdocdate: April 12 2022 $
 .Dt SSHD_CONFIG 5
 .Os
 .Sh NAME
@@ -378,10 +378,21 @@ Specifies which algorithms are allowed for signing of certificates
 by certificate authorities (CAs).
 The default is:
 .Bd -literal -offset indent
-ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
-sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,
+ssh-ed25519,ecdsa-sha2-nistp256,
+ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
+sk-ssh-ed25519@openssh.com,
+sk-ecdsa-sha2-nistp256@openssh.com,
 rsa-sha2-512,rsa-sha2-256
 .Ed
+.Pp
+If the specified list begins with a
+.Sq +
+character, then the specified algorithms will be appended to the default set
+instead of replacing them.
+If the specified list begins with a
+.Sq -
+character, then the specified algorithms (including wildcards) will be removed
+from the default set instead of replacing them.
 .Pp
 Certificates signed using other algorithms will not be accepted for
 public key or host-based authentication.
@@ -679,12 +690,11 @@ sk-ssh-ed25519-cert-v01@openssh.com,
 sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,
 rsa-sha2-512-cert-v01@openssh.com,
 rsa-sha2-256-cert-v01@openssh.com,
-ssh-rsa-cert-v01@openssh.com,
 ssh-ed25519,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
 sk-ssh-ed25519@openssh.com,
 sk-ecdsa-sha2-nistp256@openssh.com,
-rsa-sha2-512,rsa-sha2-256,ssh-rsa
+rsa-sha2-512,rsa-sha2-256
 .Ed
 .Pp
 The list of available signature algorithms may also be obtained using
@@ -764,12 +774,11 @@ sk-ssh-ed25519-cert-v01@openssh.com,
 sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,
 rsa-sha2-512-cert-v01@openssh.com,
 rsa-sha2-256-cert-v01@openssh.com,
-ssh-rsa-cert-v01@openssh.com,
 ssh-ed25519,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
 sk-ssh-ed25519@openssh.com,
 sk-ecdsa-sha2-nistp256@openssh.com,
-rsa-sha2-512,rsa-sha2-256,ssh-rsa
+rsa-sha2-512,rsa-sha2-256
 .Ed
 .Pp
 The list of available signature algorithms may also be obtained using
@@ -809,7 +818,7 @@ should ignore the user's
 during
 .Cm HostbasedAuthentication
 and use only the system-wide known hosts file
-.Pa /etc/ssh/known_hosts .
+.Pa /etc/ssh/ssh_known_hosts .
 The default is
 .Dq no .
 .It Cm Include
@@ -910,15 +919,15 @@ Specifies the available KEX (Key Exchange) algorithms.
 Multiple algorithms must be comma-separated.
 Alternately if the specified list begins with a
 .Sq +
-character, then the specified methods will be appended to the default set
+character, then the specified algorithms will be appended to the default set
 instead of replacing them.
 If the specified list begins with a
 .Sq -
-character, then the specified methods (including wildcards) will be removed
+character, then the specified algorithms (including wildcards) will be removed
 from the default set instead of replacing them.
 If the specified list begins with a
 .Sq ^
-character, then the specified methods will be placed at the head of the
+character, then the specified algorithms will be placed at the head of the
 default set.
 The supported algorithms are:
 .Pp
@@ -953,6 +962,7 @@ sntrup761x25519-sha512@openssh.com
 .Pp
 The default is:
 .Bd -literal -offset indent
+sntrup761x25519-sha512@openssh.com,
 curve25519-sha256,curve25519-sha256@libssh.org,
 ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,
 diffie-hellman-group-exchange-sha256,
@@ -1180,12 +1190,14 @@ Available keywords are
 .Cm AuthorizedPrincipalsCommandUser ,
 .Cm AuthorizedPrincipalsFile ,
 .Cm Banner ,
+.Cm CASignatureAlgorithms ,
 .Cm ChrootDirectory ,
 .Cm ClientAliveCountMax ,
 .Cm ClientAliveInterval ,
 .Cm DenyGroups ,
 .Cm DenyUsers ,
 .Cm DisableForwarding ,
+.Cm ExposeAuthInfo ,
 .Cm ForceCommand ,
 .Cm GatewayPorts ,
 .Cm GSSAPIAuthentication ,
@@ -1210,6 +1222,7 @@ Available keywords are
 .Cm PermitUserRC ,
 .Cm PubkeyAcceptedAlgorithms ,
 .Cm PubkeyAuthentication ,
+.Cm PubkeyAuthOptions ,
 .Cm RekeyLimit ,
 .Cm RevokedKeys ,
 .Cm RDomain ,
@@ -1511,12 +1524,11 @@ sk-ssh-ed25519-cert-v01@openssh.com,
 sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,
 rsa-sha2-512-cert-v01@openssh.com,
 rsa-sha2-256-cert-v01@openssh.com,
-ssh-rsa-cert-v01@openssh.com,
 ssh-ed25519,
 ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,
 sk-ssh-ed25519@openssh.com,
 sk-ecdsa-sha2-nistp256@openssh.com,
-rsa-sha2-512,rsa-sha2-256,ssh-rsa
+rsa-sha2-512,rsa-sha2-256
 .Ed
 .Pp
 The list of available signature algorithms may also be obtained using
