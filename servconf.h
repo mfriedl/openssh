@@ -233,6 +233,8 @@ typedef struct {
 	u_int	num_channel_timeouts;
 
 	int	unused_connection_timeout;
+
+	char   *sshd_monitor_path;
 }       ServerOptions;
 
 /* Information about the incoming connection as used by Match */
