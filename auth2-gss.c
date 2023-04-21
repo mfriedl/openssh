@@ -112,7 +112,7 @@ userauth_gssapi(struct ssh *ssh, const char *method)
 		return (0);
 	}
 
-	if (GSS_ERROR(PRIVSEP(ssh_gssapi_server_ctx(&ctxt, &goid)))) {
+	if (GSS_ERROR(mm_ssh_gssapi_server_ctx(&ctxt, &goid))) {
 		if (ctxt != NULL)
 			ssh_gssapi_delete_ctx(&ctxt);
 		free(doid);
@@ -159,8 +159,8 @@ input_gssapi_token(int type, u_int32_t plen, struct ssh *ssh)
 
 	recv_tok.value = p;
 	recv_tok.length = len;
-	maj_status = PRIVSEP(ssh_gssapi_accept_ctx(gssctxt, &recv_tok,
-	    &send_tok, &flags));
+	maj_status = mm_ssh_gssapi_accept_ctx(gssctxt, &recv_tok,
+	    &send_tok, &flags);
 
 	free(p);
 
@@ -224,8 +224,8 @@ input_gssapi_errtok(int type, u_int32_t plen, struct ssh *ssh)
 	recv_tok.length = len;
 
 	/* Push the error token into GSSAPI to see what it says */
-	maj_status = PRIVSEP(ssh_gssapi_accept_ctx(gssctxt, &recv_tok,
-	    &send_tok, NULL));
+	maj_status = mm_ssh_gssapi_accept_ctx(gssctxt, &recv_tok,
+	    &send_tok, NULL);
 
 	free(recv_tok.value);
 
@@ -263,7 +263,7 @@ input_gssapi_exchange_complete(int type, u_int32_t plen, struct ssh *ssh)
 	if ((r = sshpkt_get_end(ssh)) != 0)
 		fatal_fr(r, "parse packet");
 
-	authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user));
+	authenticated = mm_ssh_gssapi_userok(authctxt->user);
 
 	authctxt->postponed = 0;
 	ssh_dispatch_set(ssh, SSH2_MSG_USERAUTH_GSSAPI_TOKEN, NULL);
@@ -304,8 +304,8 @@ input_gssapi_mic(int type, u_int32_t plen, struct ssh *ssh)
 		fatal_f("sshbuf_mutable_ptr failed");
 	gssbuf.length = sshbuf_len(b);
 
-	if (!GSS_ERROR(PRIVSEP(ssh_gssapi_checkmic(gssctxt, &gssbuf, &mic))))
-		authenticated = PRIVSEP(ssh_gssapi_userok(authctxt->user));
+	if (!GSS_ERROR(mm_ssh_gssapi_checkmic(gssctxt, &gssbuf, &mic)))
+		authenticated = mm_ssh_gssapi_userok(authctxt->user);
 	else
 		logit("GSSAPI MIC check failed");
 

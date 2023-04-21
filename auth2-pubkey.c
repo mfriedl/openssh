@@ -217,11 +217,11 @@ userauth_pubkey(struct ssh *ssh, const char *method)
 #endif
 		/* test for correct signature */
 		authenticated = 0;
-		if (PRIVSEP(user_key_allowed(ssh, pw, key, 1, &authopts)) &&
-		    PRIVSEP(sshkey_verify(key, sig, slen,
+		if (mm_user_key_allowed(ssh, pw, key, 1, &authopts) &&
+		    mm_sshkey_verify(key, sig, slen,
 		    sshbuf_ptr(b), sshbuf_len(b),
 		    (ssh->compat & SSH_BUG_SIGTYPE) == 0 ? pkalg : NULL,
-		    ssh->compat, &sig_details)) == 0) {
+		    ssh->compat, &sig_details) == 0) {
 			authenticated = 1;
 		}
 		if (authenticated == 1 && sig_details != NULL) {
@@ -279,7 +279,7 @@ userauth_pubkey(struct ssh *ssh, const char *method)
 		 * if a user is not allowed to login. is this an
 		 * issue? -markus
 		 */
-		if (PRIVSEP(user_key_allowed(ssh, pw, key, 0, NULL))) {
+		if (mm_user_key_allowed(ssh, pw, key, 0, NULL)) {
 			if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_PK_OK))
 			    != 0 ||
 			    (r = sshpkt_put_cstring(ssh, pkalg)) != 0 ||

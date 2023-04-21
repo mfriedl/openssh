@@ -28,8 +28,6 @@
 #ifndef _MM_WRAP_H_
 #define _MM_WRAP_H_
 
-#define PRIVSEP(x)	mm_##x
-
 enum mm_keytype { MM_NOKEY, MM_HOSTKEY, MM_USERKEY };
 
 struct ssh;

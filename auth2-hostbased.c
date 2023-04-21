@@ -145,10 +145,10 @@ userauth_hostbased(struct ssh *ssh, const char *method)
 
 	/* test for allowed key and correct signature */
 	authenticated = 0;
-	if (PRIVSEP(hostbased_key_allowed(ssh, authctxt->pw, cuser,
-	    chost, key)) &&
-	    PRIVSEP(sshkey_verify(key, sig, slen,
-	    sshbuf_ptr(b), sshbuf_len(b), pkalg, ssh->compat, NULL)) == 0)
+	if (mm_hostbased_key_allowed(ssh, authctxt->pw, cuser,
+	    chost, key) &&
+	    mm_sshkey_verify(key, sig, slen,
+	    sshbuf_ptr(b), sshbuf_len(b), pkalg, ssh->compat, NULL) == 0)
 		authenticated = 1;
 
 	auth2_record_key(authctxt, authenticated, key);

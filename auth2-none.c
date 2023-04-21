@@ -57,7 +57,7 @@ userauth_none(struct ssh *ssh, const char *method)
 	if ((r = sshpkt_get_end(ssh)) != 0)
 		fatal_fr(r, "parse packet");
 	if (options.permit_empty_passwd && options.password_authentication)
-		return (PRIVSEP(auth_password(ssh, "")));
+		return mm_auth_password(ssh, "");
 	return (0);
 }
 

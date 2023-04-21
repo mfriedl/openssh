@@ -1597,8 +1597,7 @@ session_pty_req(struct ssh *ssh, Session *s)
 
 	/* Allocate a pty and open it. */
 	debug("Allocating pty.");
-	if (!PRIVSEP(pty_allocate(&s->ptyfd, &s->ttyfd, s->tty,
-	    sizeof(s->tty)))) {
+	if (!mm_pty_allocate(&s->ptyfd, &s->ttyfd, s->tty, sizeof(s->tty))) {
 		free(s->term);
 		s->term = NULL;
 		s->ptyfd = -1;
@@ -1971,7 +1970,7 @@ session_pty_cleanup2(Session *s)
 void
 session_pty_cleanup(Session *s)
 {
-	PRIVSEP(session_pty_cleanup2(s));
+	mm_session_pty_cleanup2(s);
 }
 
 static char *

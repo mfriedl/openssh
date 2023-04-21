@@ -140,7 +140,7 @@ userauth_banner(struct ssh *ssh)
 	if (options.banner == NULL)
 		return;
 
-	if ((banner = PRIVSEP(auth2_read_banner())) == NULL)
+	if ((banner = mm_auth2_read_banner()) == NULL)
 		goto done;
 
 	if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_BANNER)) != 0 ||
@@ -270,7 +270,7 @@ input_userauth_request(int type, u_int32_t seq, struct ssh *ssh)
 		auth_maxtries_exceeded(ssh);
 	if (authctxt->attempt++ == 0) {
 		/* setup auth context */
-		authctxt->pw = PRIVSEP(getpwnamallow(ssh, user));
+		authctxt->pw = mm_getpwnamallow(ssh, user);
 		if (authctxt->pw && strcmp(service, "ssh-connection")==0) {
 			authctxt->valid = 1;
 			debug2_f("setting up authctxt for %s", user);

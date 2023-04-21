@@ -91,7 +91,7 @@ input_kex_dh_gex_request(int type, u_int32_t seq, struct ssh *ssh)
 	}
 
 	/* Contact privileged parent */
-	kex->dh = PRIVSEP(choose_dh(min, nbits, max));
+	kex->dh = mm_choose_dh(min, nbits, max);
 	if (kex->dh == NULL) {
 		(void)sshpkt_disconnect(ssh, "no matching DH grp found");
 		r = SSH_ERR_ALLOC_FAIL;
