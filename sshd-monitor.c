@@ -150,7 +150,6 @@ u_int utmp_len = HOST_NAME_MAX+1;
 static int startup_pipe = -1;		/* in child */
 
 /* variables used for privilege separation */
-int use_privsep = -1;
 struct monitor *pmonitor = NULL;
 int privsep_is_preauth = 1;
 
@@ -293,8 +292,7 @@ privsep_preauth(struct ssh *ssh)
 	/* Store a pointer to the kex for later rekeying */
 	pmonitor->m_pkex = &ssh->kex;
 
-	if (use_privsep == PRIVSEP_ON)
-		box = ssh_sandbox_init();
+	box = ssh_sandbox_init();
 	pid = fork();
 	if (pid == -1) {
 		fatal("fork of unprivileged child failed");
@@ -352,12 +350,6 @@ privsep_preauth(struct ssh *ssh)
 static void
 privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 {
-	if (authctxt->pw->pw_uid == 0) {
-		/* File descriptor passing is broken or root login */
-		use_privsep = 0;
-		goto skip;
-	}
-
 	/* New socket pair */
 	monitor_reinit(pmonitor);
 
@@ -385,7 +377,6 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 	/* Drop privileges */
 	do_setusercontext(authctxt->pw);
 
- skip:
 	/* It is safe now to apply the key state */
 	monitor_apply_keystate(ssh, pmonitor);
 
@@ -1154,22 +1145,6 @@ main(int ac, char **av)
 		    sshkey_type(key));
 	}
 
-	if (use_privsep) {
-		struct stat st;
-
-		if (getpwnam(SSH_PRIVSEP_USER) == NULL)
-			fatal("Privilege separation user %s does not exist",
-			    SSH_PRIVSEP_USER);
-		endpwent();
-		if ((stat(_PATH_PRIVSEP_CHROOT_DIR, &st) == -1) ||
-		    (S_ISDIR(st.st_mode) == 0))
-			fatal("Missing privilege separation directory: %s",
-			    _PATH_PRIVSEP_CHROOT_DIR);
-		if (st.st_uid != 0 || (st.st_mode & (S_IWGRP|S_IWOTH)) != 0)
-			fatal("%s must be owned by root and not group or "
-			    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
-	}
-
 	/* Ensure that umask disallows at least group and world write */
 	new_umask = umask(0077) | 0022;
 	(void) umask(new_umask);
@@ -1319,15 +1294,8 @@ main(int ac, char **av)
 		fatal("sshbuf_new loginmsg failed");
 	auth_debug_reset();
 
-	if (use_privsep) {
-		if (privsep_preauth(ssh) == 1)
-			goto authenticated;
-	} else if (have_agent) {
-		if ((r = ssh_get_authentication_socket(&auth_sock)) != 0) {
-			error_r(r, "Unable to get agent socket");
-			have_agent = 0;
-		}
-	}
+	if (privsep_preauth(ssh) == 1)
+		goto authenticated;
 
 	/* perform the key exchange */
 	/* authenticate user and start session */
@@ -1335,14 +1303,11 @@ main(int ac, char **av)
 	do_authentication2(ssh);
 
 	/*
-	 * If we use privilege separation, the unprivileged child transfers
-	 * the current keystate and exits
+	 * The unprivileged child now transfers the current keystate and exits.
 	 */
-	if (use_privsep) {
-		mm_send_keystate(ssh, pmonitor);
-		ssh_packet_clear_keys(ssh);
-		exit(0);
-	}
+	mm_send_keystate(ssh, pmonitor);
+	ssh_packet_clear_keys(ssh);
+	exit(0);
 
  authenticated:
 	/*
@@ -1364,10 +1329,8 @@ main(int ac, char **av)
 	 * In privilege separation, we fork another child and prepare
 	 * file descriptor passing.
 	 */
-	if (use_privsep) {
-		privsep_postauth(ssh, authctxt);
-		/* the monitor process [priv] will not return */
-	}
+	privsep_postauth(ssh, authctxt);
+	/* the monitor process [priv] will not return */
 
 	ssh_packet_set_timeout(ssh, options.client_alive_interval,
 	    options.client_alive_count_max);
@@ -1386,8 +1349,7 @@ main(int ac, char **av)
 	verbose("Closing connection to %.500s port %d", remote_ip, remote_port);
 	ssh_packet_close(ssh);
 
-	if (use_privsep)
-		mm_terminate();
+	mm_terminate();
 
 	exit(0);
 }
@@ -1397,32 +1359,16 @@ sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
     struct sshkey *pubkey, u_char **signature, size_t *slenp,
     const u_char *data, size_t dlen, const char *alg)
 {
-	int r;
-
-	if (use_privsep) {
-		if (privkey) {
-			if (mm_sshkey_sign(ssh, privkey, signature, slenp,
-			    data, dlen, alg, options.sk_provider, NULL,
-			    ssh->compat) < 0)
-				fatal_f("privkey sign failed");
-		} else {
-			if (mm_sshkey_sign(ssh, pubkey, signature, slenp,
-			    data, dlen, alg, options.sk_provider, NULL,
-			    ssh->compat) < 0)
-				fatal_f("pubkey sign failed");
-		}
+	if (privkey) {
+		if (mm_sshkey_sign(ssh, privkey, signature, slenp,
+		    data, dlen, alg, options.sk_provider, NULL,
+		    ssh->compat) < 0)
+			fatal_f("privkey sign failed");
 	} else {
-		if (privkey) {
-			if (sshkey_sign(privkey, signature, slenp, data, dlen,
-			    alg, options.sk_provider, NULL, ssh->compat) < 0)
-				fatal_f("privkey sign failed");
-		} else {
-			if ((r = ssh_agent_sign(auth_sock, pubkey,
-			    signature, slenp, data, dlen, alg,
-			    ssh->compat)) != 0) {
-				fatal_fr(r, "agent sign failed");
-			}
-		}
+		if (mm_sshkey_sign(ssh, pubkey, signature, slenp,
+		    data, dlen, alg, options.sk_provider, NULL,
+		    ssh->compat) < 0)
+			fatal_f("pubkey sign failed");
 	}
 	return 0;
 }
@@ -1490,7 +1436,7 @@ cleanup_exit(int i)
 {
 	if (the_active_state != NULL && the_authctxt != NULL) {
 		do_cleanup(the_active_state, the_authctxt);
-		if (use_privsep && privsep_is_preauth &&
+		if (privsep_is_preauth &&
 		    pmonitor != NULL && pmonitor->m_pid > 1) {
 			debug("Killing privsep child %d", pmonitor->m_pid);
 			if (kill(pmonitor->m_pid, SIGKILL) != 0 &&

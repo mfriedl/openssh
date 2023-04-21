@@ -65,8 +65,6 @@ static void parse_server_config_depth(ServerOptions *options,
     const char *filename, struct sshbuf *conf, struct include_list *includes,
     struct connection_info *connectinfo, int flags, int *activep, int depth);
 
-/* Use of privilege separation or not */
-extern int use_privsep;
 extern struct sshbuf *cfg;
 
 /* Initializes the server options to their default values. */
@@ -428,10 +426,6 @@ fill_default_server_options(ServerOptions *options)
 		options->sshd_monitor_path = xstrdup(_PATH_SSHD_MONITOR);
 
 	assemble_algorithms(options);
-
-	/* Turn privilege separation and sandboxing on by default */
-	if (use_privsep == -1)
-		use_privsep = PRIVSEP_ON;
 
 #define CLEAR_ON_NONE(v) \
 	do { \

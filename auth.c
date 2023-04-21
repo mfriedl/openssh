@@ -67,7 +67,6 @@
 /* import */
 extern ServerOptions options;
 extern struct include_list includes;
-extern int use_privsep;
 extern struct sshauthopt *auth_opts;
 
 /* Debugging messages */
@@ -246,7 +245,7 @@ auth_log(struct ssh *ssh, int authenticated, int partial,
 	const char *authmsg;
 	char *extra = NULL;
 
-	if (use_privsep && !mm_is_monitor() && !authctxt->postponed)
+	if (!mm_is_monitor() && !authctxt->postponed)
 		return;
 
 	/* Raise logging level */

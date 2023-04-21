@@ -42,7 +42,6 @@
 
 /* import */
 extern ServerOptions options;
-extern int use_privsep;
 
 /*
  * This function processes an rhosts-style file (.rhosts, .shosts, or

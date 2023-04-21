@@ -174,9 +174,6 @@ static int *startup_pipes = NULL;
 static int *startup_flags = NULL;	/* Indicates child closed listener */
 static int startup_pipe = -1;		/* in child */
 
-/* XXX to satisfy servconf.c; remove once privsep split */
-int use_privsep = -1;
-
 /* global connection state and authentication contexts */
 Authctxt *the_authctxt = NULL;
 struct ssh *the_active_state;
@@ -1207,21 +1204,18 @@ main(int ac, char **av)
 		    sshkey_type(key));
 	}
 
-	if (use_privsep) {
-		struct stat st;
-
-		if (getpwnam(SSH_PRIVSEP_USER) == NULL)
-			fatal("Privilege separation user %s does not exist",
-			    SSH_PRIVSEP_USER);
-		endpwent();
-		if ((stat(_PATH_PRIVSEP_CHROOT_DIR, &st) == -1) ||
-		    (S_ISDIR(st.st_mode) == 0))
-			fatal("Missing privilege separation directory: %s",
-			    _PATH_PRIVSEP_CHROOT_DIR);
-		if (st.st_uid != 0 || (st.st_mode & (S_IWGRP|S_IWOTH)) != 0)
-			fatal("%s must be owned by root and not group or "
-			    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
-	}
+	/* Ensure privsep directory is correctly configured. */
+	if (getpwnam(SSH_PRIVSEP_USER) == NULL)
+		fatal("Privilege separation user %s does not exist",
+		    SSH_PRIVSEP_USER);
+	endpwent();
+	if ((stat(_PATH_PRIVSEP_CHROOT_DIR, &sb) == -1) ||
+	    (S_ISDIR(sb.st_mode) == 0))
+		fatal("Missing privilege separation directory: %s",
+		    _PATH_PRIVSEP_CHROOT_DIR);
+	if (sb.st_uid != 0 || (sb.st_mode & (S_IWGRP|S_IWOTH)) != 0)
+		fatal("%s must be owned by root and not group or "
+		    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
 
 	if (test_flag > 1)
 		print_config(ssh, connection_info);

@@ -28,8 +28,7 @@
 #ifndef _MM_WRAP_H_
 #define _MM_WRAP_H_
 
-extern int use_privsep;
-#define PRIVSEP(x)	(use_privsep ? mm_##x : x)
+#define PRIVSEP(x)	mm_##x
 
 enum mm_keytype { MM_NOKEY, MM_HOSTKEY, MM_USERKEY };
 

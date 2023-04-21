@@ -29,11 +29,6 @@
 #define	PERMIT_NO_PASSWD	2
 #define	PERMIT_YES		3
 
-/* use_privsep */
-#define PRIVSEP_OFF		0
-#define PRIVSEP_ON		1
-#define PRIVSEP_NOSANDBOX	2
-
 /* PermitOpen */
 #define PERMITOPEN_ANY		0
 #define PERMITOPEN_NONE		-2

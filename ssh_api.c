@@ -48,7 +48,6 @@ int	_ssh_host_key_sign(struct ssh *, struct sshkey *, struct sshkey *,
  * stubs for the server side implementation of kex.
  * disable privsep so our stubs will never be called.
  */
-int	use_privsep = 0;
 int	mm_sshkey_sign(struct sshkey *, u_char **, u_int *,
     const u_char *, u_int, const char *, const char *, const char *, u_int);
 
