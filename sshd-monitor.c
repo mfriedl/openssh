@@ -1,20 +1,5 @@
 /* $OpenBSD: sshd.c,v 1.600 2023/03/08 04:43:12 guenther Exp $ */
 /*
- * Author: Tatu Ylonen <ylo@cs.hut.fi>
- * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
- *                    All rights reserved
- * This program is the ssh daemon.  It listens for connections from clients,
- * and performs authentication, executes use commands or shell, and forwards
- * information to/from the application to the user client over an encrypted
- * connection.  This can also handle forwarding of X11, TCP/IP, and
- * authentication agent connections.
- *
- * As far as I am concerned, the code I have written for this software
- * can be used freely for any purpose.  Any derived versions of this
- * software must be clearly marked as such, and if the derived work is
- * incompatible with the protocol description in the RFC file, it must be
- * called by a name other than "ssh" or "Secure Shell".
- *
  * SSH2 implementation:
  * Privilege Separation:
  *
@@ -55,7 +40,6 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <paths.h>
-#include <poll.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -67,6 +51,7 @@
 
 #ifdef WITH_OPENSSL
 #include <openssl/bn.h>
+#include <openssl/evp.h>
 #endif
 
 #include "xmalloc.h"
@@ -130,14 +115,6 @@ char *config_file_name = _PATH_SERVER_CONFIG_FILE;
  * the first connection.
  */
 int debug_flag = 0;
-
-/*
- * Indicating that the daemon should only test the configuration and keys.
- * If test_flag > 1 ("-T" flag), then sshd will also dump the effective
- * configuration, optionally using connection information provided by the
- * "-C" flag.
- */
-static int test_flag = 0;
 
 /* Flag indicating that the daemon is being started from inetd. */
 static int inetd_flag = 0;
@@ -795,21 +772,6 @@ accumulate_host_timing_secret(struct sshbuf *server_cfg,
 	sshbuf_free(buf);
 }
 
-static void
-print_config(struct ssh *ssh, struct connection_info *connection_info)
-{
-	/*
-	 * If no connection info was provided by -C then use
-	 * use a blank one that will cause no predicate to match.
-	 */
-	if (connection_info == NULL)
-		connection_info = get_connection_info(ssh, 0, 0);
-	connection_info->test = 1;
-	parse_server_match_config(&options, &includes, connection_info);
-	dump_config(&options);
-	exit(0);
-}
-
 /*
  * Main program for the daemon.
  */
@@ -819,7 +781,7 @@ main(int ac, char **av)
 	struct ssh *ssh = NULL;
 	extern char *optarg;
 	extern int optind;
-	int r, opt, on = 1, do_dump_cfg = 0, remote_port;
+	int r, opt, on = 1, remote_port;
 	int sock_in = -1, sock_out = -1, rexeced_flag = 0;
 	const char *remote_ip, *rdomain;
 	char *fp, *line, *laddr, *logfile = NULL;
@@ -872,9 +834,6 @@ main(int ac, char **av)
 		case 'D':
 			/* ignore */
 			break;
-		case 'G':
-			do_dump_cfg = 1;
-			break;
 		case 'E':
 			logfile = optarg;
 			/* FALLTHROUGH */
@@ -925,10 +884,9 @@ main(int ac, char **av)
 			    &options, optarg, 1);
 			break;
 		case 't':
-			test_flag = 1;
-			break;
 		case 'T':
-			test_flag = 2;
+		case 'G':
+			fatal("test/dump modes not supported");
 			break;
 		case 'C':
 			connection_info = get_connection_info(ssh, 0, 0);
@@ -959,10 +917,18 @@ main(int ac, char **av)
 			break;
 		}
 	}
+
+	/* Check that there are no remaining arguments. */
+	if (optind < ac) {
+		fprintf(stderr, "Extra argument %s.\n", av[optind]);
+		exit(1);
+	}
+
+	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
+
 	if (!rexeced_flag)
 		fatal("sshd-monitor should not be executed directly");
-	if (!test_flag && !do_dump_cfg && !path_absolute(av[0]))
-		fatal("sshd re-exec requires execution with an absolute path");
+
 	closefrom(REEXEC_MIN_FREE_FD);
 
 #ifdef WITH_OPENSSL
@@ -985,19 +951,15 @@ main(int ac, char **av)
 
 	sensitive_data.have_ssh2_key = 0;
 
-	/*
-	 * If we're not doing an extended test do not silently ignore connection
-	 * test params.
-	 */
-	if (test_flag < 2 && connection_info != NULL)
-		fatal("Config test connection parameter (-C) provided without "
-		    "test mode (-T)");
-
 	/* Fetch our configuration */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[rexeced]");
 	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg);
+	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
+	/* Fill in default values for those options not explicitly set. */
+	fill_default_server_options(&options);
+
 	if (!debug_flag) {
 		startup_pipe = dup(REEXEC_STARTUP_PIPE_FD);
 		close(REEXEC_STARTUP_PIPE_FD);
@@ -1007,16 +969,6 @@ main(int ac, char **av)
 		 */
 		(void)atomicio(vwrite, startup_pipe, "\0", 1);
 	}
-
-	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
-
-#ifdef WITH_OPENSSL
-	if (options.moduli_file != NULL)
-		dh_set_moduli_file(options.moduli_file);
-#endif
-
-	/* Fill in default values for those options not explicitly set. */
-	fill_default_server_options(&options);
 
 	/* Check that options are sensible */
 	if (options.authorized_keys_command_user == NULL &&
@@ -1047,16 +999,10 @@ main(int ac, char **av)
 			    "enabled authentication methods");
 	}
 
-	/* Check that there are no remaining arguments. */
-	if (optind < ac) {
-		fprintf(stderr, "Extra argument %s.\n", av[optind]);
-		exit(1);
-	}
-
-	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
-
-	if (do_dump_cfg)
-		print_config(ssh, connection_info);
+#ifdef WITH_OPENSSL
+	if (options.moduli_file != NULL)
+		dh_set_moduli_file(options.moduli_file);
+#endif
 
 	/* load host keys */
 	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
@@ -1223,13 +1169,6 @@ main(int ac, char **av)
 			fatal("%s must be owned by root and not group or "
 			    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
 	}
-
-	if (test_flag > 1)
-		print_config(ssh, connection_info);
-
-	/* Configuration looks good, so exit if in test mode. */
-	if (test_flag)
-		exit(0);
 
 	/* Ensure that umask disallows at least group and world write */
 	new_umask = umask(0077) | 0022;
