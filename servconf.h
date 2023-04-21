@@ -230,6 +230,7 @@ typedef struct {
 	int	unused_connection_timeout;
 
 	char   *sshd_monitor_path;
+	char   *sshd_privsep_preauth_path;
 }       ServerOptions;
 
 /* Information about the incoming connection as used by Match */

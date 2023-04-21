@@ -214,15 +214,13 @@ mm_sshkey_sign(struct ssh *ssh, struct sshkey *key, u_char **sigp, size_t *lenp,
     const u_char *data, size_t datalen, const char *hostkey_alg,
     const char *sk_provider, const char *sk_pin, u_int compat)
 {
-	struct kex *kex = *pmonitor->m_pkex;
 	struct sshbuf *m;
-	u_int ndx = kex->host_key_index(key, 0, ssh);
 	int r;
 
 	debug3_f("entering");
 	if ((m = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
-	if ((r = sshbuf_put_u32(m, ndx)) != 0 ||
+	if ((r = sshkey_puts(key, m)) != 0 ||
 	    (r = sshbuf_put_string(m, data, datalen)) != 0 ||
 	    (r = sshbuf_put_cstring(m, hostkey_alg)) != 0 ||
 	    (r = sshbuf_put_u32(m, compat)) != 0)
@@ -235,6 +233,7 @@ mm_sshkey_sign(struct ssh *ssh, struct sshkey *key, u_char **sigp, size_t *lenp,
 	if ((r = sshbuf_get_string(m, sigp, lenp)) != 0)
 		fatal_fr(r, "parse");
 	sshbuf_free(m);
+	debug3_f("%s signature len=%zu", hostkey_alg, *lenp);
 
 	return (0);
 }

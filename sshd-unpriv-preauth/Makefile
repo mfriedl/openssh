@@ -2,7 +2,7 @@
 
 .PATH:		${.CURDIR}/..
 
-SRCS=	sshd-monitor.c auth2-methods.c \
+SRCS=	sshd-unpriv-preauth.c auth2-methods.c \
 	auth-rhosts.c auth-passwd.c sshpty.c sshlogin.c servconf.c \
 	serverloop.c auth.c auth2.c auth-options.c session.c auth2-chall.c \
 	groupaccess.c auth-bsdauth.c auth2-hostbased.c auth2-kbdint.c \
@@ -14,9 +14,9 @@ SRCS+=	${SRCS_BASE} ${SRCS_KEX} ${SRCS_KEXS} ${SRCS_KEY} ${SRCS_KEYP} \
 	${SRCS_KRL} ${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \
 	${SRCS_SK_CLIENT}
 
-PROG=	sshd-monitor
-BINDIR=	/usr/libexec
+PROG=	sshd-unpriv-preauth
 BINMODE=511
+BINDIR=	/usr/libexec
 NOMAN=	1
 
 .include <bsd.own.mk> # for KERBEROS and AFS

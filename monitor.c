@@ -540,24 +540,27 @@ int
 mm_answer_sign(struct ssh *ssh, int sock, struct sshbuf *m)
 {
 	extern int auth_sock;			/* XXX move to state struct? */
-	struct sshkey *key;
+	struct sshkey *pubkey, *key;
 	struct sshbuf *sigbuf = NULL;
 	u_char *p = NULL, *signature = NULL;
 	char *alg = NULL;
-	size_t datlen, siglen, alglen;
-	int r, is_proof = 0;
-	u_int keyid, compat;
+	size_t datlen, siglen;
+	int r, is_proof = 0, keyid;
+	u_int compat;
 	const char proof_req[] = "hostkeys-prove-00@openssh.com";
 
 	debug3_f("entering");
 
-	if ((r = sshbuf_get_u32(m, &keyid)) != 0 ||
+	if ((r = sshkey_froms(m, &pubkey)) != 0 ||
 	    (r = sshbuf_get_string(m, &p, &datlen)) != 0 ||
-	    (r = sshbuf_get_cstring(m, &alg, &alglen)) != 0 ||
+	    (r = sshbuf_get_cstring(m, &alg, NULL)) != 0 ||
 	    (r = sshbuf_get_u32(m, &compat)) != 0)
 		fatal_fr(r, "parse");
-	if (keyid > INT_MAX)
-		fatal_f("invalid key ID");
+
+	if ((keyid = get_hostkey_index(pubkey, 1, ssh)) == -1)
+		fatal_f("unknown hostkey");
+	debug_f("hostkey %s index %d", sshkey_ssh_name(pubkey), keyid);
+	sshkey_free(pubkey);
 
 	/*
 	 * Supported KEX types use SHA1 (20 bytes), SHA256 (32 bytes),

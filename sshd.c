@@ -1240,6 +1240,13 @@ main(int ac, char **av)
 		fatal("%s does not exist or is not executable", rexec_argv[0]);
 	debug3("using %s for re-exec", rexec_argv[0]);
 
+	/* Ensure that the privsep binary exists now too. */
+	if (stat(options.sshd_privsep_preauth_path, &sb) != 0 ||
+	    !(sb.st_mode & (S_IXOTH|S_IXUSR))) {
+		fatal("%s does not exist or is not executable",
+		    options.sshd_privsep_preauth_path);
+	}
+
 	listener_proctitle = prepare_proctitle(ac, av);
 
 	/* Ensure that umask disallows at least group and world write */
@@ -1335,6 +1342,7 @@ main(int ac, char **av)
 		if (dup2(STDIN_FILENO, STDOUT_FILENO) == -1)
 			debug3("dup2 stdout: %s", strerror(errno));
 	}
+	log_redirect_stderr_to(NULL); /* dup might clobber log fd */
 	if (config_s[1] != REEXEC_CONFIG_PASS_FD) {
 		if (dup2(config_s[1], REEXEC_CONFIG_PASS_FD) == -1)
 			debug3("dup2 config_s: %s", strerror(errno));
