@@ -970,7 +970,7 @@ get_connection_info(struct ssh *ssh, int populate, int use_dns)
 
 	if (ssh == NULL || !populate)
 		return &ci;
-	ci.host = auth_get_canonical_hostname(ssh, use_dns);
+	ci.host = use_dns ? ssh_remote_hostname(ssh) : ssh_remote_ipaddr(ssh);
 	ci.address = ssh_remote_ipaddr(ssh);
 	ci.laddress = ssh_local_ipaddr(ssh);
 	ci.lport = ssh_local_port(ssh);

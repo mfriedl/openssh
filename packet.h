@@ -159,6 +159,7 @@ int	 ssh_remote_port(struct ssh *);
 const char *ssh_local_ipaddr(struct ssh *);
 int	 ssh_local_port(struct ssh *);
 const char *ssh_packet_rdomain_in(struct ssh *);
+char	*ssh_remote_hostname(struct ssh *);
 
 void	 ssh_packet_set_rekey_limits(struct ssh *, u_int64_t, u_int32_t);
 time_t	 ssh_packet_get_rekey_timeout(struct ssh *);

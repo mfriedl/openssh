@@ -44,9 +44,9 @@
 
 /* import */
 extern ServerOptions options;
+extern struct authmethod_cfg methodcfg_none;
 
-/* "none" is allowed only one time */
-static int none_enabled = 1;
+extern int none_enabled;
 
 static int
 userauth_none(struct ssh *ssh, const char *method)
@@ -62,8 +62,6 @@ userauth_none(struct ssh *ssh, const char *method)
 }
 
 Authmethod method_none = {
-	"none",
-	NULL,
+	&methodcfg_none,
 	userauth_none,
-	&none_enabled
 };

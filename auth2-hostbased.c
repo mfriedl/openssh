@@ -53,6 +53,7 @@
 
 /* import */
 extern ServerOptions options;
+extern struct authmethod_cfg methodcfg_hostbased;
 
 static int
 userauth_hostbased(struct ssh *ssh, const char *method)
@@ -251,8 +252,6 @@ hostbased_key_allowed(struct ssh *ssh, struct passwd *pw,
 }
 
 Authmethod method_hostbased = {
-	"hostbased",
-	NULL,
+	&methodcfg_hostbased,
 	userauth_hostbased,
-	&options.hostbased_authentication
 };

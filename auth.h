@@ -95,11 +95,15 @@ struct Authctxt {
  * the client.
  */
 
+struct authmethod_cfg {
+	const char *name;
+	const char *synonym;
+	int *enabled;
+};
+
 struct Authmethod {
-	char	*name;
-	char	*synonym;
+	struct authmethod_cfg *cfg;
 	int	(*userauth)(struct ssh *, const char *);
-	int	*enabled;
 };
 
 /*

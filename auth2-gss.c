@@ -46,6 +46,7 @@
 #define SSH_GSSAPI_MAX_MECHS	2048
 
 extern ServerOptions options;
+extern struct authmethod_cfg methodcfg_gssapi;
 
 static int input_gssapi_token(int type, u_int32_t plen, struct ssh *ssh);
 static int input_gssapi_mic(int type, u_int32_t plen, struct ssh *ssh);
@@ -329,9 +330,7 @@ input_gssapi_mic(int type, u_int32_t plen, struct ssh *ssh)
 }
 
 Authmethod method_gssapi = {
-	"gssapi-with-mic",
-	NULL,
+	&methodcfg_gssapi,
 	userauth_gssapi,
-	&options.gss_authentication
 };
 #endif

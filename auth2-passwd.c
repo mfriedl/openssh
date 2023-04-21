@@ -45,6 +45,7 @@
 
 /* import */
 extern ServerOptions options;
+extern struct authmethod_cfg methodcfg_passwd;
 
 static int
 userauth_passwd(struct ssh *ssh, const char *method)
@@ -71,8 +72,6 @@ userauth_passwd(struct ssh *ssh, const char *method)
 }
 
 Authmethod method_passwd = {
-	"password",
-	NULL,
+	&methodcfg_passwd,
 	userauth_passwd,
-	&options.password_authentication
 };

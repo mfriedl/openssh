@@ -69,6 +69,7 @@
 
 /* import */
 extern ServerOptions options;
+extern struct authmethod_cfg methodcfg_pubkey;
 
 static char *
 format_key(const struct sshkey *key)
@@ -799,8 +800,6 @@ user_key_allowed(struct ssh *ssh, struct passwd *pw, struct sshkey *key,
 }
 
 Authmethod method_pubkey = {
-	"publickey",
-	"publickey-hostbound-v00@openssh.com",
+	&methodcfg_pubkey,
 	userauth_pubkey,
-	&options.pubkey_authentication
 };

@@ -2,7 +2,7 @@
 
 .PATH:		${.CURDIR}/..
 
-SRCS=	sshd-monitor.c \
+SRCS=	sshd-monitor.c auth2-methods.c \
 	auth-rhosts.c auth-passwd.c sshpty.c sshlogin.c servconf.c \
 	serverloop.c auth.c auth2.c auth-options.c session.c auth2-chall.c \
 	groupaccess.c auth-bsdauth.c auth2-hostbased.c auth2-kbdint.c \

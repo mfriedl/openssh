@@ -1,23 +1,5 @@
 /* $OpenBSD: sshd.c,v 1.600 2023/03/08 04:43:12 guenther Exp $ */
 /*
- * Author: Tatu Ylonen <ylo@cs.hut.fi>
- * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
- *                    All rights reserved
- * This program is the ssh daemon.  It listens for connections from clients,
- * and performs authentication, executes use commands or shell, and forwards
- * information to/from the application to the user client over an encrypted
- * connection.  This can also handle forwarding of X11, TCP/IP, and
- * authentication agent connections.
- *
- * As far as I am concerned, the code I have written for this software
- * can be used freely for any purpose.  Any derived versions of this
- * software must be clearly marked as such, and if the derived work is
- * incompatible with the protocol description in the RFC file, it must be
- * called by a name other than "ssh" or "Secure Shell".
- *
- * SSH2 implementation:
- * Privilege Separation:
- *
  * Copyright (c) 2000, 2001, 2002 Markus Friedl.  All rights reserved.
  * Copyright (c) 2002 Niels Provos.  All rights reserved.
  *
@@ -67,47 +49,30 @@
 
 #ifdef WITH_OPENSSL
 #include <openssl/bn.h>
+#include <openssl/evp.h>
 #endif
 
 #include "xmalloc.h"
 #include "ssh.h"
-#include "ssh2.h"
 #include "sshpty.h"
-#include "packet.h"
 #include "log.h"
 #include "sshbuf.h"
 #include "misc.h"
-#include "match.h"
 #include "servconf.h"
-#include "uidswap.h"
 #include "compat.h"
-#include "cipher.h"
 #include "digest.h"
 #include "sshkey.h"
-#include "kex.h"
 #include "authfile.h"
 #include "pathnames.h"
-#include "atomicio.h"
 #include "canohost.h"
 #include "hostfile.h"
 #include "auth.h"
 #include "authfd.h"
 #include "msg.h"
-#include "dispatch.h"
-#include "channels.h"
-#include "session.h"
-#include "monitor.h"
-#ifdef GSSAPI
-#include "ssh-gss.h"
-#endif
-#include "monitor_wrap.h"
-#include "ssh-sandbox.h"
-#include "auth-options.h"
 #include "version.h"
 #include "ssherr.h"
 #include "sk-api.h"
 #include "srclimit.h"
-#include "dh.h"
 
 /* Re-exec fds */
 #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
@@ -164,7 +129,6 @@ static int listen_socks[MAX_LISTEN_SOCKS];
 static int num_listen_socks = 0;
 
 /* Daemon's agent connection */
-int auth_sock = -1;
 static int have_agent = 0;
 
 /*
@@ -210,10 +174,8 @@ static int *startup_pipes = NULL;
 static int *startup_flags = NULL;	/* Indicates child closed listener */
 static int startup_pipe = -1;		/* in child */
 
-/* variables used for privilege separation */
+/* XXX to satisfy servconf.c; remove once privsep split */
 int use_privsep = -1;
-struct monitor *pmonitor = NULL;
-int privsep_is_preauth = 1;
 
 /* global connection state and authentication contexts */
 Authctxt *the_authctxt = NULL;
@@ -230,10 +192,6 @@ struct include_list includes = TAILQ_HEAD_INITIALIZER(includes);
 
 /* message to be displayed after login */
 struct sshbuf *loginmsg;
-
-/* Prototypes for various functions defined later in this file. */
-void destroy_sensitive_data(void);
-void demote_sensitive_data(void);
 
 static char *listener_proctitle;
 
@@ -316,140 +274,6 @@ main_sigchld_handler(int sig)
 	    (pid == -1 && errno == EINTR))
 		;
 	errno = save_errno;
-}
-
-/* Destroy the host and server keys.  They will no longer be needed. */
-void
-destroy_sensitive_data(void)
-{
-	u_int i;
-
-	for (i = 0; i < options.num_host_key_files; i++) {
-		if (sensitive_data.host_keys[i]) {
-			sshkey_free(sensitive_data.host_keys[i]);
-			sensitive_data.host_keys[i] = NULL;
-		}
-		if (sensitive_data.host_certificates[i]) {
-			sshkey_free(sensitive_data.host_certificates[i]);
-			sensitive_data.host_certificates[i] = NULL;
-		}
-	}
-}
-
-/* Demote private to public keys for network child */
-void
-demote_sensitive_data(void)
-{
-	struct sshkey *tmp;
-	u_int i;
-	int r;
-
-	for (i = 0; i < options.num_host_key_files; i++) {
-		if (sensitive_data.host_keys[i]) {
-			if ((r = sshkey_from_private(
-			    sensitive_data.host_keys[i], &tmp)) != 0)
-				fatal_r(r, "could not demote host %s key",
-				    sshkey_type(sensitive_data.host_keys[i]));
-			sshkey_free(sensitive_data.host_keys[i]);
-			sensitive_data.host_keys[i] = tmp;
-		}
-		/* Certs do not need demotion */
-	}
-}
-
-static struct sshkey *
-get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
-{
-	u_int i;
-	struct sshkey *key;
-
-	for (i = 0; i < options.num_host_key_files; i++) {
-		switch (type) {
-		case KEY_RSA_CERT:
-		case KEY_DSA_CERT:
-		case KEY_ECDSA_CERT:
-		case KEY_ED25519_CERT:
-		case KEY_ECDSA_SK_CERT:
-		case KEY_ED25519_SK_CERT:
-		case KEY_XMSS_CERT:
-			key = sensitive_data.host_certificates[i];
-			break;
-		default:
-			key = sensitive_data.host_keys[i];
-			if (key == NULL && !need_private)
-				key = sensitive_data.host_pubkeys[i];
-			break;
-		}
-		if (key == NULL || key->type != type)
-			continue;
-		switch (type) {
-		case KEY_ECDSA:
-		case KEY_ECDSA_SK:
-		case KEY_ECDSA_CERT:
-		case KEY_ECDSA_SK_CERT:
-			if (key->ecdsa_nid != nid)
-				continue;
-			/* FALLTHROUGH */
-		default:
-			return need_private ?
-			    sensitive_data.host_keys[i] : key;
-		}
-	}
-	return NULL;
-}
-
-struct sshkey *
-get_hostkey_public_by_type(int type, int nid, struct ssh *ssh)
-{
-	return get_hostkey_by_type(type, nid, 0, ssh);
-}
-
-struct sshkey *
-get_hostkey_private_by_type(int type, int nid, struct ssh *ssh)
-{
-	return get_hostkey_by_type(type, nid, 1, ssh);
-}
-
-struct sshkey *
-get_hostkey_by_index(int ind)
-{
-	if (ind < 0 || (u_int)ind >= options.num_host_key_files)
-		return (NULL);
-	return (sensitive_data.host_keys[ind]);
-}
-
-struct sshkey *
-get_hostkey_public_by_index(int ind, struct ssh *ssh)
-{
-	if (ind < 0 || (u_int)ind >= options.num_host_key_files)
-		return (NULL);
-	return (sensitive_data.host_pubkeys[ind]);
-}
-
-int
-get_hostkey_index(struct sshkey *key, int compare, struct ssh *ssh)
-{
-	u_int i;
-
-	for (i = 0; i < options.num_host_key_files; i++) {
-		if (sshkey_is_cert(key)) {
-			if (key == sensitive_data.host_certificates[i] ||
-			    (compare && sensitive_data.host_certificates[i] &&
-			    sshkey_equal(key,
-			    sensitive_data.host_certificates[i])))
-				return (i);
-		} else {
-			if (key == sensitive_data.host_keys[i] ||
-			    (compare && sensitive_data.host_keys[i] &&
-			    sshkey_equal(key, sensitive_data.host_keys[i])))
-				return (i);
-			if (key == sensitive_data.host_pubkeys[i] ||
-			    (compare && sensitive_data.host_pubkeys[i] &&
-			    sshkey_equal(key, sensitive_data.host_pubkeys[i])))
-				return (i);
-		}
-	}
-	return (-1);
 }
 
 /*
@@ -1150,7 +974,7 @@ main(int ac, char **av)
 		}
 	}
 	if (!test_flag && !do_dump_cfg && !path_absolute(av[0]))
-		fatal("sshd re-exec requires execution with an absolute path");
+		fatal("sshd requires execution with an absolute path");
 	closefrom(REEXEC_DEVCRYPTO_RESERVED_FD);
 
 #ifdef WITH_OPENSSL
@@ -1190,11 +1014,6 @@ main(int ac, char **av)
 	parse_server_config(&options, config_file_name, cfg,
 	    &includes, NULL, 0);
 
-#ifdef WITH_OPENSSL
-	if (options.moduli_file != NULL)
-		dh_set_moduli_file(options.moduli_file);
-#endif
-
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
 
@@ -1213,7 +1032,7 @@ main(int ac, char **av)
 	/*
 	 * Check whether there is any path through configured auth methods.
 	 * Unfortunately it is not possible to verify this generally before
-	 * daemonisation in the presence of Match block, but this catches
+	 * daemonisation in the presence of Match blocks, but this catches
 	 * and warns for trivial misconfigurations that could break login.
 	 */
 	if (options.num_auth_methods != 0) {
@@ -1539,41 +1358,6 @@ main(int ac, char **av)
 	execv(rexec_argv[0], rexec_argv);
 
 	fatal("rexec of %s failed: %s", rexec_argv[0], strerror(errno));
-}
-
-int
-sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
-    struct sshkey *pubkey, u_char **signature, size_t *slenp,
-    const u_char *data, size_t dlen, const char *alg)
-{
-	int r;
-
-	if (use_privsep) {
-		if (privkey) {
-			if (mm_sshkey_sign(ssh, privkey, signature, slenp,
-			    data, dlen, alg, options.sk_provider, NULL,
-			    ssh->compat) < 0)
-				fatal_f("privkey sign failed");
-		} else {
-			if (mm_sshkey_sign(ssh, pubkey, signature, slenp,
-			    data, dlen, alg, options.sk_provider, NULL,
-			    ssh->compat) < 0)
-				fatal_f("pubkey sign failed");
-		}
-	} else {
-		if (privkey) {
-			if (sshkey_sign(privkey, signature, slenp, data, dlen,
-			    alg, options.sk_provider, NULL, ssh->compat) < 0)
-				fatal_f("privkey sign failed");
-		} else {
-			if ((r = ssh_agent_sign(auth_sock, pubkey,
-			    signature, slenp, data, dlen, alg,
-			    ssh->compat)) != 0) {
-				fatal_fr(r, "agent sign failed");
-			}
-		}
-	}
-	return 0;
 }
 
 /* server specific fatal cleanup */
