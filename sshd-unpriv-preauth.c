@@ -168,6 +168,13 @@ void destroy_sensitive_data(void);
 void demote_sensitive_data(void);
 static void do_ssh2_kex(struct ssh *);
 
+/* XXX stub */
+int
+mm_is_monitor(void)
+{
+	return 0;
+}
+
 /* Destroy the host and server keys.  They will no longer be needed. */
 void
 destroy_sensitive_data(void)

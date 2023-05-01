@@ -179,6 +179,13 @@ void destroy_sensitive_data(void);
 void demote_sensitive_data(void);
 static void do_ssh2_kex(struct ssh *);
 
+/* XXX stub */
+int
+mm_is_monitor(void)
+{
+	return 1;
+}
+
 /*
  * Signal handler for the alarm after the login grace period has expired.
  */

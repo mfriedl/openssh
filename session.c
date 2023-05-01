@@ -1827,10 +1827,6 @@ session_signal_req(struct ssh *ssh, Session *s)
 		    signame, s->forced ? "forced-command" : "subsystem");
 		goto out;
 	}
-	if (mm_is_monitor()) {
-		error_f("session signalling requires privilege separation");
-		goto out;
-	}
 
 	debug_f("signal %s, killpg(%ld, %d)", signame, (long)s->pid, sig);
 	temporarily_use_uid(s->pw);
