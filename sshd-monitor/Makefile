@@ -8,7 +8,7 @@ SRCS=	sshd-monitor.c auth2-methods.c \
 	groupaccess.c auth-bsdauth.c auth2-hostbased.c auth2-kbdint.c \
 	auth2-none.c auth2-passwd.c auth2-pubkey.c auth2-pubkeyfile.c \
 	monitor.c monitor_wrap.c \
-	sftp-server.c sftp-common.c sftp-realpath.c sandbox-pledge.c srclimit.c
+	sftp-server.c sftp-common.c sftp-realpath.c srclimit.c
 SRCS+=	authfd.c compat.c dns.c fatal.c hostfile.c readpass.c utf8.c uidswap.c
 SRCS+=	${SRCS_BASE} ${SRCS_KEX} ${SRCS_KEXS} ${SRCS_KEY} ${SRCS_KEYP} \
 	${SRCS_KRL} ${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \

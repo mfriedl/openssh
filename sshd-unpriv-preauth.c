@@ -86,7 +86,6 @@
 #include "ssh-gss.h"
 #endif
 #include "monitor_wrap.h"
-#include "ssh-sandbox.h"
 #include "auth-options.h"
 #include "version.h"
 #include "ssherr.h"
@@ -241,6 +240,10 @@ privsep_child_demote(void)
 			fatal("setgroups: %.100s", strerror(errno));
 		permanently_set_uid(pw);
 	}
+
+	/* sandbox ourselves */
+	if (pledge("stdio", NULL) == -1)
+		fatal_f("pledge()");
 }
 
 static void
@@ -958,8 +961,6 @@ main(int ac, char **av)
 	demote_sensitive_data();
 
 	setproctitle("%s", "[unpriv-preauth]");
-	// XXX
-	error("XXX sandbox");
 
 	privsep_child_demote();
 
