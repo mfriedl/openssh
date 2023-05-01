@@ -655,8 +655,17 @@ main(int ac, char **av)
 #endif
 
 	/* If requested, redirect the logs to the specified logfile. */
-	if (logfile != NULL)
-		log_redirect_stderr_to(logfile);
+	if (logfile != NULL) {
+		char *cp, pid_s[32];
+
+		snprintf(pid_s, sizeof(pid_s), "%ld", (unsigned long)getpid());
+		cp = percent_expand(logfile,
+		    "p", pid_s,
+		    "P", "sshd-unpriv-preauth",
+		    (char *)NULL);
+		log_redirect_stderr_to(cp);
+		free(cp);
+	}
 
 	log_init(__progname,
 	    options.log_level == SYSLOG_LEVEL_NOT_SET ?
