@@ -310,6 +310,7 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	/*
 	 * Protocol from monitor to unpriv privsep process:
 	 *	string	configuration
+	 *	uint64	timing_secret	XXX move delays to monitor and remove
 	 *	string	host_keys[] {
 	 *		string public_key
 	 *		string certificate
@@ -323,6 +324,7 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	 *	}
 	 */
 	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
+	    (r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
 	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
 	    (r = sshbuf_put_stringb(m, ssh->kex->server_version)) != 0 ||
 	    (r = sshbuf_put_stringb(m, ssh->kex->client_version)) != 0 ||

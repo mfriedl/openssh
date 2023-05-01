@@ -1224,8 +1224,7 @@ do_child(struct ssh *ssh, Session *s, const char *command)
 
 	sshpkt_fmt_connection_id(ssh, remote_id, sizeof(remote_id));
 
-	/* remove hostkey from the child's memory */
-	destroy_sensitive_data();
+	/* remove keys from memory */
 	ssh_packet_clear_keys(ssh);
 
 	/* Force a password change */
