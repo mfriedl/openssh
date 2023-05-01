@@ -372,17 +372,64 @@ usage(void)
 	exit(1);
 }
 
+static struct sshbuf *
+pack_hostkeys(void)
+{
+	struct sshbuf *keybuf = NULL, *hostkeys = NULL;
+	int r;
+	u_int i;
+
+	if ((keybuf = sshbuf_new()) == NULL ||
+	    (hostkeys = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+
+	/* pack hostkeys into a string. Empty key slots get empty strings */
+	for (i = 0; i < options.num_host_key_files; i++) {
+		/* private key */
+		sshbuf_reset(keybuf);
+		if (sensitive_data.host_keys[i] != NULL &&
+		    (r = sshkey_private_serialize(sensitive_data.host_keys[i],
+		    keybuf)) != 0)
+			fatal_fr(r, "serialize hostkey private");
+		if ((r = sshbuf_put_stringb(hostkeys, keybuf)) != 0)
+			fatal_fr(r, "compose hostkey private");
+		/* public key */
+		if (sensitive_data.host_pubkeys[i] != NULL) {
+			if ((r = sshkey_puts(sensitive_data.host_pubkeys[i],
+			    hostkeys)) != 0)
+				fatal_fr(r, "compose hostkey public");
+		} else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose hostkey empty public");
+		}
+		/* cert */
+		if (sensitive_data.host_certificates[i] != NULL) {
+			if ((r = sshkey_puts(
+			    sensitive_data.host_certificates[i],
+			    hostkeys)) != 0)
+				fatal_fr(r, "compose host cert");
+		} else {
+			if ((r = sshbuf_put_string(hostkeys, NULL, 0)) != 0)
+				fatal_fr(r, "compose host cert empty");
+		}
+	}
+
+	sshbuf_free(keybuf);
+	return hostkeys;
+}
+
 static void
 send_rexec_state(int fd, struct sshbuf *conf)
 {
-	struct sshbuf *m = NULL, *inc = NULL;
+	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL;
 	struct include_item *item = NULL;
 	int r;
 
 	debug3_f("entering fd = %d config len %zu", fd,
 	    sshbuf_len(conf));
 
-	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
+	if ((m = sshbuf_new()) == NULL ||
+	    (inc = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 
 	/* pack includes into a string */
@@ -393,9 +440,16 @@ send_rexec_state(int fd, struct sshbuf *conf)
 			fatal_fr(r, "compose includes");
 	}
 
+	hostkeys = pack_hostkeys();
+
 	/*
 	 * Protocol from reexec master to child:
 	 *	string	configuration
+	 *	string	host_keys[] {
+	 *		string private_key
+	 *		string public_key
+	 *		string certificate
+	 *	}
 	 *	string	included_files[] {
 	 *		string	selector
 	 *		string	filename
@@ -403,6 +457,7 @@ send_rexec_state(int fd, struct sshbuf *conf)
 	 *	}
 	 */
 	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
+	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
 	if (ssh_msg_send(fd, 0, m) == -1)
@@ -410,6 +465,7 @@ send_rexec_state(int fd, struct sshbuf *conf)
 
 	sshbuf_free(m);
 	sshbuf_free(inc);
+	sshbuf_free(hostkeys);
 
 	debug3_f("done");
 }
