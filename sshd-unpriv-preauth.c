@@ -700,6 +700,7 @@ main(int ac, char **av)
 	pmonitor->m_pkex = &ssh->kex;
 
 	/* Fetch our configuration */
+	/* XXX do this using the monitor instead of a separate fd */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[unpriv-preauth-early]");

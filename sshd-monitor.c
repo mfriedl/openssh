@@ -283,6 +283,7 @@ pack_hostkeys(void)
 	return hostkeys;
 }
 
+/* XXX simplify this by passing using a monitor call */
 static void
 send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 {
@@ -416,6 +417,8 @@ privsep_preauth(struct ssh *ssh)
 		 * We know that the monitor sockets will have fds > 4 because
 		 * of the reserved fds in hold[].
 		 */
+
+		/* XXX simplify this by passing config via a monitor call */
 
 		/* Send configuration to ancestor sshd-monitor process */
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
