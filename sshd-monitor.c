@@ -143,10 +143,10 @@ static int have_agent = 0;
  * not very useful.  Currently, memory locking is not implemented.
  */
 struct {
+	u_int		num_hostkeys;
 	struct sshkey	**host_keys;		/* all private host keys */
 	struct sshkey	**host_pubkeys;		/* all public host keys */
 	struct sshkey	**host_certificates;	/* all public host certificates */
-	int		have_ssh2_key;
 } sensitive_data;
 
 /* record remote hostname or ip */
@@ -718,11 +718,61 @@ usage(void)
 static void
 parse_hostkeys(struct sshbuf *hostkeys)
 {
-	/* XXX */
+	int r;
+	u_int num_keys = 0;
+	struct sshkey *k;
+	struct sshbuf *kbuf;
+	const u_char *cp;
+	size_t len;
+
+	while (sshbuf_len(hostkeys) != 0) {
+		if (num_keys > 2048)
+			fatal_f("too many hostkeys");
+		sensitive_data.host_keys = xrecallocarray(
+		    sensitive_data.host_keys, num_keys, num_keys + 1,
+		    sizeof(*sensitive_data.host_pubkeys));
+		sensitive_data.host_pubkeys = xrecallocarray(
+		    sensitive_data.host_pubkeys, num_keys, num_keys + 1,
+		    sizeof(*sensitive_data.host_pubkeys));
+		sensitive_data.host_certificates = xrecallocarray(
+		    sensitive_data.host_certificates, num_keys, num_keys + 1,
+		    sizeof(*sensitive_data.host_certificates));
+		/* private key */
+		k = NULL;
+		if ((r = sshbuf_froms(hostkeys, &kbuf)) != 0)
+			fatal_fr(r, "extract privkey");
+		if (sshbuf_len(kbuf) != 0 &&
+		    (r = sshkey_private_deserialize(kbuf, &k)) != 0)
+			fatal_fr(r, "parse pubkey");
+		sensitive_data.host_keys[num_keys] = k;
+		sshbuf_free(kbuf);
+		if (k)
+			debug2_f("privkey %u: %s", num_keys, sshkey_ssh_name(k));
+		/* public key */
+		k = NULL;
+		if ((r = sshbuf_get_string_direct(hostkeys, &cp, &len)) != 0)
+			fatal_fr(r, "extract pubkey");
+		if (len != 0 && (r = sshkey_from_blob(cp, len, &k)) != 0)
+			fatal_fr(r, "parse pubkey");
+		sensitive_data.host_pubkeys[num_keys] = k;
+		if (k)
+			debug2_f("pubkey %u: %s", num_keys, sshkey_ssh_name(k));
+		/* certificate */
+		k = NULL;
+		if ((r = sshbuf_get_string_direct(hostkeys, &cp, &len)) != 0)
+			fatal_fr(r, "extract pubkey");
+		if (len != 0 && (r = sshkey_from_blob(cp, len, &k)) != 0)
+			fatal_fr(r, "parse pubkey");
+		sensitive_data.host_certificates[num_keys] = k;
+		if (k)
+			debug2_f("cert %u: %s", num_keys, sshkey_ssh_name(k));
+		num_keys++;
+	}
+	sensitive_data.num_hostkeys = num_keys;
 }
 
 static void
-recv_rexec_state(int fd, struct sshbuf *conf)
+recv_rexec_state(int fd, struct sshbuf *conf, uint64_t *timing_secretp)
 {
 	struct sshbuf *m, *inc, *hostkeys;
 	u_char *cp, ver;
@@ -741,6 +791,7 @@ recv_rexec_state(int fd, struct sshbuf *conf)
 	if (ver != 0)
 		fatal_f("rexec version mismatch");
 	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 || /* XXX _direct */
+	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
 	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
 	    (r = sshbuf_get_stringb(m, inc)) != 0)
 		fatal_fr(r, "parse config");
@@ -764,6 +815,7 @@ recv_rexec_state(int fd, struct sshbuf *conf)
 	free(cp);
 	sshbuf_free(m);
 	sshbuf_free(hostkeys);
+	sshbuf_free(inc);
 
 	debug3_f("done");
 }
@@ -833,43 +885,6 @@ set_process_rdomain(struct ssh *ssh, const char *name)
 	debug_f("set routing domain %d (was %d)", rtable, ortable);
 }
 
-static void
-accumulate_host_timing_secret(struct sshbuf *server_cfg,
-    struct sshkey *key)
-{
-	static struct ssh_digest_ctx *ctx;
-	u_char *hash;
-	size_t len;
-	struct sshbuf *buf;
-	int r;
-
-	if (ctx == NULL && (ctx = ssh_digest_start(SSH_DIGEST_SHA512)) == NULL)
-		fatal_f("ssh_digest_start");
-	if (key == NULL) { /* finalize */
-		/* add server config in case we are using agent for host keys */
-		if (ssh_digest_update(ctx, sshbuf_ptr(server_cfg),
-		    sshbuf_len(server_cfg)) != 0)
-			fatal_f("ssh_digest_update");
-		len = ssh_digest_bytes(SSH_DIGEST_SHA512);
-		hash = xmalloc(len);
-		if (ssh_digest_final(ctx, hash, len) != 0)
-			fatal_f("ssh_digest_final");
-		options.timing_secret = PEEK_U64(hash);
-		freezero(hash, len);
-		ssh_digest_free(ctx);
-		ctx = NULL;
-		return;
-	}
-	if ((buf = sshbuf_new()) == NULL)
-		fatal_f("could not allocate buffer");
-	if ((r = sshkey_private_serialize(key, buf)) != 0)
-		fatal_fr(r, "encode %s key", sshkey_ssh_name(key));
-	if (ssh_digest_update(ctx, sshbuf_ptr(buf), sshbuf_len(buf)) != 0)
-		fatal_f("ssh_digest_update");
-	sshbuf_reset(buf);
-	sshbuf_free(buf);
-}
-
 /*
  * Main program for the daemon.
  */
@@ -880,19 +895,17 @@ main(int ac, char **av)
 	extern char *optarg;
 	extern int optind;
 	int r, opt, on = 1, remote_port;
-	int sock_in = -1, sock_out = -1, rexeced_flag = 0;
+	int sock_in = -1, sock_out = -1, rexeced_flag = 0, have_key = 0;
 	const char *remote_ip, *rdomain;
-	char *fp, *line, *laddr, *logfile = NULL;
-	u_int i, j;
+	char *line, *laddr, *logfile = NULL;
+	u_int i;
 	u_int64_t ibytes, obytes;
 	mode_t new_umask;
-	struct sshkey *key;
-	struct sshkey *pubkey;
-	int keytype;
 	Authctxt *authctxt;
 	struct connection_info *connection_info = NULL;
 	sigset_t sigmask;
 	struct stat sb;
+	uint64_t timing_secret = 0;
 
 	sigemptyset(&sigmask);
 	sigprocmask(SIG_SETMASK, &sigmask, NULL);
@@ -1063,16 +1076,16 @@ main(int ac, char **av)
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
 
-	sensitive_data.have_ssh2_key = 0;
-
 	/* Fetch our configuration */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[rexeced]");
-	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg);
+	recv_rexec_state(REEXEC_CONFIG_PASS_FD, cfg, &timing_secret);
+	close(REEXEC_CONFIG_PASS_FD);
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
+	options.timing_secret = timing_secret;
 
 	if (startup_pipe != -1) {
 		/*
@@ -1116,12 +1129,6 @@ main(int ac, char **av)
 		dh_set_moduli_file(options.moduli_file);
 #endif
 
-	/* load host keys */
-	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
-	    sizeof(struct sshkey *));
-	sensitive_data.host_pubkeys = xcalloc(options.num_host_key_files,
-	    sizeof(struct sshkey *));
-
 	if (options.host_key_agent) {
 		if (strcmp(options.host_key_agent, SSH_AUTHSOCKET_ENV_NAME))
 			setenv(SSH_AUTHSOCKET_ENV_NAME,
@@ -1133,138 +1140,20 @@ main(int ac, char **av)
 			    options.host_key_agent);
 	}
 
+	if (options.num_host_key_files != sensitive_data.num_hostkeys) {
+		fatal("internal error: hostkeys confused (config %u recvd %u)",
+		    options.num_host_key_files, sensitive_data.num_hostkeys);
+	}
+
 	for (i = 0; i < options.num_host_key_files; i++) {
-		int ll = options.host_key_file_userprovided[i] ?
-		    SYSLOG_LEVEL_ERROR : SYSLOG_LEVEL_DEBUG1;
-
-		if (options.host_key_files[i] == NULL)
-			continue;
-		if ((r = sshkey_load_private(options.host_key_files[i], "",
-		    &key, NULL)) != 0 && r != SSH_ERR_SYSTEM_ERROR)
-			do_log2_r(r, ll, "Unable to load host key \"%s\"",
-			    options.host_key_files[i]);
-		if (sshkey_is_sk(key) &&
-		    key->sk_flags & SSH_SK_USER_PRESENCE_REQD) {
-			debug("host key %s requires user presence, ignoring",
-			    options.host_key_files[i]);
-			key->sk_flags &= ~SSH_SK_USER_PRESENCE_REQD;
-		}
-		if (r == 0 && key != NULL &&
-		    (r = sshkey_shield_private(key)) != 0) {
-			do_log2_r(r, ll, "Unable to shield host key \"%s\"",
-			    options.host_key_files[i]);
-			sshkey_free(key);
-			key = NULL;
-		}
-		if ((r = sshkey_load_public(options.host_key_files[i],
-		    &pubkey, NULL)) != 0 && r != SSH_ERR_SYSTEM_ERROR)
-			do_log2_r(r, ll, "Unable to load host key \"%s\"",
-			    options.host_key_files[i]);
-		if (pubkey != NULL && key != NULL) {
-			if (!sshkey_equal(pubkey, key)) {
-				error("Public key for %s does not match "
-				    "private key", options.host_key_files[i]);
-				sshkey_free(pubkey);
-				pubkey = NULL;
-			}
-		}
-		if (pubkey == NULL && key != NULL) {
-			if ((r = sshkey_from_private(key, &pubkey)) != 0)
-				fatal_r(r, "Could not demote key: \"%s\"",
-				    options.host_key_files[i]);
-		}
-		if (pubkey != NULL && (r = sshkey_check_rsa_length(pubkey,
-		    options.required_rsa_size)) != 0) {
-			error_fr(r, "Host key %s", options.host_key_files[i]);
-			sshkey_free(pubkey);
-			sshkey_free(key);
-			continue;
-		}
-		sensitive_data.host_keys[i] = key;
-		sensitive_data.host_pubkeys[i] = pubkey;
-
-		if (key == NULL && pubkey != NULL && have_agent) {
-			debug("will rely on agent for hostkey %s",
-			    options.host_key_files[i]);
-			keytype = pubkey->type;
-		} else if (key != NULL) {
-			keytype = key->type;
-			accumulate_host_timing_secret(cfg, key);
-		} else {
-			do_log2(ll, "Unable to load host key: %s",
-			    options.host_key_files[i]);
-			sensitive_data.host_keys[i] = NULL;
-			sensitive_data.host_pubkeys[i] = NULL;
-			continue;
-		}
-
-		switch (keytype) {
-		case KEY_RSA:
-		case KEY_DSA:
-		case KEY_ECDSA:
-		case KEY_ED25519:
-		case KEY_ECDSA_SK:
-		case KEY_ED25519_SK:
-		case KEY_XMSS:
-			if (have_agent || key != NULL)
-				sensitive_data.have_ssh2_key = 1;
+		if (sensitive_data.host_keys[i] != NULL ||
+		    (have_agent && sensitive_data.host_pubkeys[i] != NULL)) {
+			have_key = 1;
 			break;
 		}
-		if ((fp = sshkey_fingerprint(pubkey, options.fingerprint_hash,
-		    SSH_FP_DEFAULT)) == NULL)
-			fatal("sshkey_fingerprint failed");
-		debug("%s host key #%d: %s %s",
-		    key ? "private" : "agent", i, sshkey_ssh_name(pubkey), fp);
-		free(fp);
 	}
-	accumulate_host_timing_secret(cfg, NULL);
-	if (!sensitive_data.have_ssh2_key) {
-		logit("sshd: no hostkeys available -- exiting.");
-		exit(1);
-	}
-
-	/*
-	 * Load certificates. They are stored in an array at identical
-	 * indices to the public keys that they relate to.
-	 */
-	sensitive_data.host_certificates = xcalloc(options.num_host_key_files,
-	    sizeof(struct sshkey *));
-	for (i = 0; i < options.num_host_key_files; i++)
-		sensitive_data.host_certificates[i] = NULL;
-
-	for (i = 0; i < options.num_host_cert_files; i++) {
-		if (options.host_cert_files[i] == NULL)
-			continue;
-		if ((r = sshkey_load_public(options.host_cert_files[i],
-		    &key, NULL)) != 0) {
-			error_r(r, "Could not load host certificate \"%s\"",
-			    options.host_cert_files[i]);
-			continue;
-		}
-		if (!sshkey_is_cert(key)) {
-			error("Certificate file is not a certificate: %s",
-			    options.host_cert_files[i]);
-			sshkey_free(key);
-			continue;
-		}
-		/* Find matching private key */
-		for (j = 0; j < options.num_host_key_files; j++) {
-			if (sshkey_equal_public(key,
-			    sensitive_data.host_pubkeys[j])) {
-				sensitive_data.host_certificates[j] = key;
-				break;
-			}
-		}
-		if (j >= options.num_host_key_files) {
-			error("No matching private key for certificate: %s",
-			    options.host_cert_files[i]);
-			sshkey_free(key);
-			continue;
-		}
-		sensitive_data.host_certificates[j] = key;
-		debug("host certificate: #%u type %d %s", j, key->type,
-		    sshkey_type(key));
-	}
+	if (!have_key)
+		fatal("internal error: monitor recieved no hostkeys");
 
 	/* Ensure that umask disallows at least group and world write */
 	new_umask = umask(0077) | 0022;
@@ -1292,7 +1181,6 @@ main(int ac, char **av)
 	ssh_signal(SIGPIPE, SIG_IGN);
 
 	/* Get a connection, either from inetd or rexec */
-	close(REEXEC_CONFIG_PASS_FD);
 	if (inetd_flag) {
 		/*
 		 * NB. must be different fd numbers for the !socket case,

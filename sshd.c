@@ -445,6 +445,7 @@ send_rexec_state(int fd, struct sshbuf *conf)
 	/*
 	 * Protocol from reexec master to child:
 	 *	string	configuration
+	 *	uint64	timing_secret
 	 *	string	host_keys[] {
 	 *		string private_key
 	 *		string public_key
@@ -457,6 +458,7 @@ send_rexec_state(int fd, struct sshbuf *conf)
 	 *	}
 	 */
 	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
+	    (r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
 	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
