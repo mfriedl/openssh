@@ -486,19 +486,6 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 	ssh_packet_set_authenticated(ssh);
 }
 
-static void
-append_hostkey_type(struct sshbuf *b, const char *s)
-{
-	int r;
-
-	if (match_pattern_list(s, options.hostkeyalgorithms, 0) != 1) {
-		debug3_f("%s key not permitted by HostkeyAlgorithms", s);
-		return;
-	}
-	if ((r = sshbuf_putf(b, "%s%s", sshbuf_len(b) > 0 ? "," : "", s)) != 0)
-		fatal_fr(r, "sshbuf_putf");
-}
-
 static struct sshkey *
 get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
 {
