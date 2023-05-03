@@ -177,7 +177,6 @@ struct sshbuf *loginmsg;
 /* Prototypes for various functions defined later in this file. */
 void destroy_sensitive_data(void);
 void demote_sensitive_data(void);
-static void do_ssh2_kex(struct ssh *);
 
 /* XXX stub */
 int
@@ -498,66 +497,6 @@ append_hostkey_type(struct sshbuf *b, const char *s)
 	}
 	if ((r = sshbuf_putf(b, "%s%s", sshbuf_len(b) > 0 ? "," : "", s)) != 0)
 		fatal_fr(r, "sshbuf_putf");
-}
-
-static char *
-list_hostkey_types(void)
-{
-	struct sshbuf *b;
-	struct sshkey *key;
-	char *ret;
-	u_int i;
-
-	if ((b = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	for (i = 0; i < options.num_host_key_files; i++) {
-		key = sensitive_data.host_keys[i];
-		if (key == NULL)
-			key = sensitive_data.host_pubkeys[i];
-		if (key == NULL)
-			continue;
-		switch (key->type) {
-		case KEY_RSA:
-			/* for RSA we also support SHA2 signatures */
-			append_hostkey_type(b, "rsa-sha2-512");
-			append_hostkey_type(b, "rsa-sha2-256");
-			/* FALLTHROUGH */
-		case KEY_DSA:
-		case KEY_ECDSA:
-		case KEY_ED25519:
-		case KEY_ECDSA_SK:
-		case KEY_ED25519_SK:
-		case KEY_XMSS:
-			append_hostkey_type(b, sshkey_ssh_name(key));
-			break;
-		}
-		/* If the private key has a cert peer, then list that too */
-		key = sensitive_data.host_certificates[i];
-		if (key == NULL)
-			continue;
-		switch (key->type) {
-		case KEY_RSA_CERT:
-			/* for RSA we also support SHA2 signatures */
-			append_hostkey_type(b,
-			    "rsa-sha2-512-cert-v01@openssh.com");
-			append_hostkey_type(b,
-			    "rsa-sha2-256-cert-v01@openssh.com");
-			/* FALLTHROUGH */
-		case KEY_DSA_CERT:
-		case KEY_ECDSA_CERT:
-		case KEY_ED25519_CERT:
-		case KEY_ECDSA_SK_CERT:
-		case KEY_ED25519_SK_CERT:
-		case KEY_XMSS_CERT:
-			append_hostkey_type(b, sshkey_ssh_name(key));
-			break;
-		}
-	}
-	if ((ret = sshbuf_dup_string(b)) == NULL)
-		fatal_f("sshbuf_dup_string failed");
-	sshbuf_free(b);
-	debug_f("%s", ret);
-	return ret;
 }
 
 static struct sshkey *
@@ -1315,22 +1254,11 @@ main(int ac, char **av)
 	debug3("using %s for unprivileged preauth",
 	    options.sshd_privsep_preauth_path);
 
-	if (privsep_preauth(ssh) == 1)
-		goto authenticated;
+	if (privsep_preauth(ssh) != 1)
+		fatal("privsep_preauth failed");
 
-	/* perform the key exchange */
-	/* authenticate user and start session */
-	do_ssh2_kex(ssh);
-	do_authentication2(ssh);
+	/* Now user is authenticated */
 
-	/*
-	 * The unprivileged child now transfers the current keystate and exits.
-	 */
-	mm_send_keystate(ssh, pmonitor);
-	ssh_packet_clear_keys(ssh);
-	exit(0);
-
- authenticated:
 	/*
 	 * Cancel the alarm we set to limit the time taken for
 	 * authentication.
@@ -1392,63 +1320,6 @@ sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
 			fatal_f("pubkey sign failed");
 	}
 	return 0;
-}
-
-/* SSH2 key exchange */
-static void
-do_ssh2_kex(struct ssh *ssh)
-{
-	char *hkalgs = NULL, *myproposal[PROPOSAL_MAX];
-	const char *compression = NULL;
-	struct kex *kex;
-	int r;
-
-	if (options.rekey_limit || options.rekey_interval)
-		ssh_packet_set_rekey_limits(ssh, options.rekey_limit,
-		    options.rekey_interval);
-
-	if (options.compression == COMP_NONE)
-		compression = "none";
-	hkalgs = list_hostkey_types();
-
-	kex_proposal_populate_entries(ssh, myproposal, options.kex_algorithms,
-	    options.ciphers, options.macs, compression, hkalgs);
-
-	free(hkalgs);
-
-	/* start key exchange */
-	if ((r = kex_setup(ssh, myproposal)) != 0)
-		fatal_r(r, "kex_setup");
-	kex = ssh->kex;
-#ifdef WITH_OPENSSL
-	kex->kex[KEX_DH_GRP1_SHA1] = kex_gen_server;
-	kex->kex[KEX_DH_GRP14_SHA1] = kex_gen_server;
-	kex->kex[KEX_DH_GRP14_SHA256] = kex_gen_server;
-	kex->kex[KEX_DH_GRP16_SHA512] = kex_gen_server;
-	kex->kex[KEX_DH_GRP18_SHA512] = kex_gen_server;
-	kex->kex[KEX_DH_GEX_SHA1] = kexgex_server;
-	kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
-	kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
-#endif
-	kex->kex[KEX_C25519_SHA256] = kex_gen_server;
-	kex->kex[KEX_KEM_SNTRUP761X25519_SHA512] = kex_gen_server;
-	kex->load_host_public_key=&get_hostkey_public_by_type;
-	kex->load_host_private_key=&get_hostkey_private_by_type;
-	kex->host_key_index=&get_hostkey_index;
-	kex->sign = sshd_hostkey_sign;
-
-	ssh_dispatch_run_fatal(ssh, DISPATCH_BLOCK, &kex->done);
-
-#ifdef DEBUG_KEXDH
-	/* send 1st encrypted/maced/compressed message */
-	if ((r = sshpkt_start(ssh, SSH2_MSG_IGNORE)) != 0 ||
-	    (r = sshpkt_put_cstring(ssh, "markus")) != 0 ||
-	    (r = sshpkt_send(ssh)) != 0 ||
-	    (r = ssh_packet_write_wait(ssh)) != 0)
-		fatal_fr(r, "send test");
-#endif
-	kex_proposal_free_entries(myproposal);
-	debug("KEX done");
 }
 
 /* server specific fatal cleanup */
