@@ -455,6 +455,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	free(cp);
 	sshbuf_free(m);
 	sshbuf_free(hostkeys);
+	sshbuf_free(inc);
 
 	debug3_f("done");
 }
