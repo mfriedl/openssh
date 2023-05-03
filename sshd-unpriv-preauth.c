@@ -125,20 +125,9 @@ static char **saved_argv;
 int auth_sock = -1;
 static int have_agent = 0;
 
-/*
- * Any really sensitive data in the application is contained in this
- * structure. The idea is that this structure could be locked into memory so
- * that the pages do not get written into swap.  However, there are some
- * problems. The private key contains BIGNUMs, and we do not (in principle)
- * have access to the internals of them, and locking just the structure is
- * not very useful.  Currently, memory locking is not implemented.
- */
-struct {
-	struct sshkey	**host_keys;		/* all private host keys */
-	struct sshkey	**host_pubkeys;		/* all public host keys */
-	struct sshkey	**host_certificates;	/* all public host certificates */
-	u_int		num_hostkeys;
-} sensitive_data;
+u_int		num_hostkeys;
+struct sshkey	**host_pubkeys;		/* all public host keys */
+struct sshkey	**host_certificates;	/* all public host certificates */
 
 /* record remote hostname or ip */
 u_int utmp_len = HOST_NAME_MAX+1;
@@ -164,8 +153,6 @@ struct include_list includes = TAILQ_HEAD_INITIALIZER(includes);
 struct sshbuf *loginmsg;
 
 /* Prototypes for various functions defined later in this file. */
-void destroy_sensitive_data(void);
-void demote_sensitive_data(void);
 static void do_ssh2_kex(struct ssh *);
 
 /* XXX stub */
@@ -238,9 +225,7 @@ list_hostkey_types(void)
 	if ((b = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 	for (i = 0; i < options.num_host_key_files; i++) {
-		key = sensitive_data.host_keys[i];
-		if (key == NULL)
-			key = sensitive_data.host_pubkeys[i];
+		key = host_pubkeys[i];
 		if (key == NULL)
 			continue;
 		switch (key->type) {
@@ -259,7 +244,7 @@ list_hostkey_types(void)
 			break;
 		}
 		/* If the private key has a cert peer, then list that too */
-		key = sensitive_data.host_certificates[i];
+		key = host_certificates[i];
 		if (key == NULL)
 			continue;
 		switch (key->type) {
@@ -287,8 +272,8 @@ list_hostkey_types(void)
 	return ret;
 }
 
-static struct sshkey *
-get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
+struct sshkey *
+get_hostkey_public_by_type(int type, int nid, struct ssh *ssh)
 {
 	u_int i;
 	struct sshkey *key;
@@ -302,12 +287,10 @@ get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
 		case KEY_ECDSA_SK_CERT:
 		case KEY_ED25519_SK_CERT:
 		case KEY_XMSS_CERT:
-			key = sensitive_data.host_certificates[i];
+			key = host_certificates[i];
 			break;
 		default:
-			key = sensitive_data.host_keys[i];
-			if (key == NULL && !need_private)
-				key = sensitive_data.host_pubkeys[i];
+			key = host_pubkeys[i];
 			break;
 		}
 		if (key == NULL || key->type != type)
@@ -321,31 +304,24 @@ get_hostkey_by_type(int type, int nid, int need_private, struct ssh *ssh)
 				continue;
 			/* FALLTHROUGH */
 		default:
-			return need_private ?
-			    sensitive_data.host_keys[i] : key;
+			return key;
 		}
 	}
 	return NULL;
 }
 
-struct sshkey *
-get_hostkey_public_by_type(int type, int nid, struct ssh *ssh)
-{
-	return get_hostkey_by_type(type, nid, 0, ssh);
-}
-
+/* XXX remove */
 struct sshkey *
 get_hostkey_private_by_type(int type, int nid, struct ssh *ssh)
 {
-	return get_hostkey_by_type(type, nid, 1, ssh);
+	return NULL;
 }
 
+/* XXX remove */
 struct sshkey *
 get_hostkey_by_index(int ind)
 {
-	if (ind < 0 || (u_int)ind >= options.num_host_key_files)
-		return (NULL);
-	return (sensitive_data.host_keys[ind]);
+	return NULL;
 }
 
 struct sshkey *
@@ -353,7 +329,7 @@ get_hostkey_public_by_index(int ind, struct ssh *ssh)
 {
 	if (ind < 0 || (u_int)ind >= options.num_host_key_files)
 		return (NULL);
-	return (sensitive_data.host_pubkeys[ind]);
+	return host_pubkeys[ind];
 }
 
 int
@@ -363,19 +339,14 @@ get_hostkey_index(struct sshkey *key, int compare, struct ssh *ssh)
 
 	for (i = 0; i < options.num_host_key_files; i++) {
 		if (sshkey_is_cert(key)) {
-			if (key == sensitive_data.host_certificates[i] ||
-			    (compare && sensitive_data.host_certificates[i] &&
-			    sshkey_equal(key,
-			    sensitive_data.host_certificates[i])))
+			if (key == host_certificates[i] ||
+			    (compare && host_certificates[i] &&
+			    sshkey_equal(key, host_certificates[i])))
 				return (i);
 		} else {
-			if (key == sensitive_data.host_keys[i] ||
-			    (compare && sensitive_data.host_keys[i] &&
-			    sshkey_equal(key, sensitive_data.host_keys[i])))
-				return (i);
-			if (key == sensitive_data.host_pubkeys[i] ||
-			    (compare && sensitive_data.host_pubkeys[i] &&
-			    sshkey_equal(key, sensitive_data.host_pubkeys[i])))
+			if (key == host_pubkeys[i] ||
+			    (compare && host_pubkeys[i] &&
+			    sshkey_equal(key, host_pubkeys[i])))
 				return (i);
 		}
 	}
@@ -406,19 +377,17 @@ parse_hostkeys(struct sshbuf *hostkeys)
 	while (sshbuf_len(hostkeys) != 0) {
 		if (num_keys > 2048)
 			fatal_f("too many hostkeys");
-		sensitive_data.host_pubkeys = xrecallocarray(
-		    sensitive_data.host_pubkeys, num_keys, num_keys + 1,
-		    sizeof(*sensitive_data.host_pubkeys));
-		sensitive_data.host_certificates = xrecallocarray(
-		    sensitive_data.host_certificates, num_keys, num_keys + 1,
-		    sizeof(*sensitive_data.host_certificates));
+		host_pubkeys = xrecallocarray(host_pubkeys,
+		    num_keys, num_keys + 1, sizeof(*host_pubkeys));
+		host_certificates = xrecallocarray(host_certificates,
+		    num_keys, num_keys + 1, sizeof(*host_certificates));
 		/* public key */
 		k = NULL;
 		if ((r = sshbuf_get_string_direct(hostkeys, &cp, &len)) != 0)
 			fatal_fr(r, "extract pubkey");
 		if (len != 0 && (r = sshkey_from_blob(cp, len, &k)) != 0)
 			fatal_fr(r, "parse pubkey");
-		sensitive_data.host_pubkeys[num_keys] = k;
+		host_pubkeys[num_keys] = k;
 		if (k)
 			debug2_f("key %u: %s", num_keys, sshkey_ssh_name(k));
 		/* certificate */
@@ -427,14 +396,12 @@ parse_hostkeys(struct sshbuf *hostkeys)
 			fatal_fr(r, "extract pubkey");
 		if (len != 0 && (r = sshkey_from_blob(cp, len, &k)) != 0)
 			fatal_fr(r, "parse pubkey");
-		sensitive_data.host_certificates[num_keys] = k;
+		host_certificates[num_keys] = k;
 		if (k)
 			debug2_f("cert %u: %s", num_keys, sshkey_ssh_name(k));
 		num_keys++;
 	}
-	sensitive_data.host_keys = xcalloc(num_keys,
-	    sizeof(*sensitive_data.host_keys));
-	sensitive_data.num_hostkeys = num_keys;
+	num_hostkeys = num_keys;
 }
 
 static void
@@ -727,13 +694,13 @@ main(int ac, char **av)
 			    options.host_key_agent);
 	}
 
-	if (options.num_host_key_files != sensitive_data.num_hostkeys) {
+	if (options.num_host_key_files != num_hostkeys) {
 		fatal("internal error: hostkeys confused (config %u recvd %u)",
-		    options.num_host_key_files, sensitive_data.num_hostkeys);
+		    options.num_host_key_files, num_hostkeys);
 	}
 
 	for (i = 0; i < options.num_host_key_files; i++) {
-		if (sensitive_data.host_pubkeys[i] != NULL) {
+		if (host_pubkeys[i] != NULL) {
 			have_key = 1;
 			break;
 		}
