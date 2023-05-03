@@ -113,7 +113,7 @@ void	do_child(struct ssh *, Session *, const char *);
 void	do_motd(void);
 int	check_quietlogin(Session *, const char *);
 
-static void do_authenticated2(struct ssh *, Authctxt *);
+static void do_authenticated2(struct ssh *);
 
 static int session_pty_req(struct ssh *, Session *);
 
@@ -345,7 +345,7 @@ do_authenticated(struct ssh *ssh, Authctxt *authctxt)
 
 	prepare_auth_info_file(authctxt->pw, authctxt->session_info);
 
-	do_authenticated2(ssh, authctxt);
+	do_authenticated2(ssh);
 
 	do_cleanup(ssh, authctxt);
 }
@@ -1476,7 +1476,7 @@ session_open(Authctxt *authctxt, int chanid)
 	s->authctxt = authctxt;
 	s->pw = authctxt->pw;
 	if (s->pw == NULL || !authctxt->valid)
-		fatal("no user for session %d", s->self);
+		fatal("no user for session %d (pw %p valid %d)", s->self, s->pw, authctxt->valid);
 	debug("session_open: session %d: link with channel %d", s->self, chanid);
 	s->chanid = chanid;
 	return 1;
@@ -2211,10 +2211,12 @@ session_tty_list(void)
 void
 session_proctitle(Session *s)
 {
+	debug_f("called");
 	if (s->pw == NULL)
 		error("no user for session %d", s->self);
 	else
 		setproctitle("%s@%s", s->pw->pw_name, session_tty_list());
+	debug_f("done");
 }
 
 int
@@ -2279,9 +2281,9 @@ session_setup_x11fwd(struct ssh *ssh, Session *s)
 }
 
 static void
-do_authenticated2(struct ssh *ssh, Authctxt *authctxt)
+do_authenticated2(struct ssh *ssh)
 {
-	server_loop2(ssh, authctxt);
+	server_loop2(ssh);
 }
 
 void

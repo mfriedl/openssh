@@ -2,7 +2,7 @@
 
 .include <bsd.own.mk>
 
-SUBDIR=	ssh sshd sshd-monitor sshd-unpriv-preauth \
+SUBDIR=	ssh sshd sshd-monitor sshd-unpriv-preauth sshd-unpriv-postauth \
 	ssh-add ssh-keygen ssh-agent scp sftp-server \
 	ssh-keysign ssh-keyscan sftp ssh-pkcs11-helper ssh-sk-helper
 

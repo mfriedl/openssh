@@ -231,6 +231,7 @@ typedef struct {
 
 	char   *sshd_monitor_path;
 	char   *sshd_privsep_preauth_path;
+	char   *sshd_privsep_postauth_path;
 }       ServerOptions;
 
 /* Information about the incoming connection as used by Match */

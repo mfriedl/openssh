@@ -42,6 +42,7 @@
 /* Binary paths for the sshd components */
 #define _PATH_SSHD_MONITOR		"/usr/libexec/sshd-monitor"
 #define _PATH_SSHD_PRIVSEP_PREAUTH	"/usr/libexec/sshd-unpriv-preauth"
+#define _PATH_SSHD_PRIVSEP_POSTAUTH	"/usr/libexec/sshd-unpriv-postauth"
 
 /*
  * The process id of the daemon listening for connections is saved here to

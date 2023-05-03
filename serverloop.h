@@ -23,6 +23,6 @@
 
 struct ssh;
 
-void    server_loop2(struct ssh *, Authctxt *);
+void    server_loop2(struct ssh *);
 
 #endif

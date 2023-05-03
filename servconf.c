@@ -180,6 +180,7 @@ initialize_server_options(ServerOptions *options)
 	options->unused_connection_timeout = -1;
 	options->sshd_monitor_path = NULL;
 	options->sshd_privsep_preauth_path = NULL;
+	options->sshd_privsep_postauth_path = NULL;
 }
 
 /* Returns 1 if a string option is unset or set to "none" or 0 otherwise. */
@@ -425,10 +426,12 @@ fill_default_server_options(ServerOptions *options)
 		options->unused_connection_timeout = 0;
 	if (options->sshd_monitor_path == NULL)
 		options->sshd_monitor_path = xstrdup(_PATH_SSHD_MONITOR);
-	if (options->sshd_privsep_preauth_path == NULL) {
+	if (options->sshd_privsep_preauth_path == NULL)
 		options->sshd_privsep_preauth_path =
 		    xstrdup(_PATH_SSHD_PRIVSEP_PREAUTH);
-	}
+	if (options->sshd_privsep_postauth_path == NULL)
+		options->sshd_privsep_postauth_path =
+		    xstrdup(_PATH_SSHD_PRIVSEP_POSTAUTH);
 
 	assemble_algorithms(options);
 

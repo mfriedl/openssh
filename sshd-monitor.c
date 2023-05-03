@@ -288,6 +288,9 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 {
 	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL;
 	struct include_item *item = NULL;
+	Authctxt *authctxt = ssh->authctxt;
+	char *pw_name = NULL;
+	size_t pw_len = 0;
 	int r;
 
 	debug3_f("entering fd = %d config len %zu", fd,
@@ -307,6 +310,14 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 
 	hostkeys = pack_hostkeys();
 
+	/* authenticated user (postauth) */
+	if (authctxt && authctxt->pw && authctxt->authenticated) {
+		if ((pw_name = authctxt->pw->pw_name) != NULL)
+			pw_len = strlen(pw_name);
+	}
+
+	debug3_f("send user len %zu", pw_len);
+
 	/*
 	 * Protocol from monitor to unpriv privsep process:
 	 *	string	configuration
@@ -317,6 +328,9 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	 *	}
 	 *	string  server_banner
 	 *	string  client_banner
+	 *	string  keystate (postauth)
+	 *	string  authenticated_user (postauth)
+	 *	string  session_info (postauth)
 	 *	string	included_files[] {
 	 *		string	selector
 	 *		string	filename
@@ -328,6 +342,9 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
 	    (r = sshbuf_put_stringb(m, ssh->kex->server_version)) != 0 ||
 	    (r = sshbuf_put_stringb(m, ssh->kex->client_version)) != 0 ||
+	    (r = sshbuf_put_stringb(m, monitor_get_keystate())) != 0 ||
+	    (r = sshbuf_put_string(m, pw_name, pw_len)) != 0 ||
+	    (r = sshbuf_put_stringb(m, authctxt ? authctxt->session_info : NULL)) != 0 ||
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
 	if (ssh_msg_send(fd, 0, m) == -1)
@@ -429,15 +446,15 @@ privsep_preauth(struct ssh *ssh)
 			debug3_f("dup2 stdin: %s", strerror(errno));
 		if (dup2(ssh_packet_get_connection_out(ssh),
 		    STDOUT_FILENO) == -1)
-			debug3_f("dup2 stdin: %s", strerror(errno));
+			debug3_f("dup2 stout: %s", strerror(errno));
 		/* leave stderr as-is */
 		log_redirect_stderr_to(NULL); /* dup can clobber log fd */
 		if (dup2(pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) == -1)
-			debug3_f("dup2 stdin: %s", strerror(errno));
+			debug3_f("dup2 PRIVSEP_MONITOR_FD: %s", strerror(errno));
 		if (dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
-			debug3_f("dup2 stdin: %s", strerror(errno));
+			debug3_f("dup2 PRIVSEP_LOG_FD: %s", strerror(errno));
 		if (dup2(config_s[1], PRIVSEP_CONFIG_PASS_FD) == -1)
-			debug3_f("dup2 stdin: %s", strerror(errno));
+			debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
 		closefrom(PRIVSEP_MIN_FREE_FD);
 
 		execv(options.sshd_privsep_preauth_path, saved_argv);
@@ -447,8 +464,28 @@ privsep_preauth(struct ssh *ssh)
 }
 
 static void
-privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
+privsep_postauth(struct ssh *ssh)
 {
+	int devnull, i, hold[3], status, r, config_s[2];
+	pid_t pid;
+
+debug_f("pkt %d/%d",
+ssh_packet_get_connection_in(ssh),
+ssh_packet_get_connection_out(ssh));
+
+	/*
+	 * We need to ensure that we don't assign the monitor fds to
+	 * ones that will collide with the clients, so reserve a few
+	 * now. They will be freed momentarily.
+	 */
+	if ((devnull = open(_PATH_DEVNULL, O_RDWR)) == -1)
+		fatal_f("open %s: %s", _PATH_DEVNULL, strerror(errno));
+	for (i = 0; i < (int)(sizeof(hold) / sizeof(*hold)); i++) {
+		if ((hold[i] = dup(devnull)) == -1)
+			fatal_f("dup devnull: %s", strerror(errno));
+		fcntl(hold[i], F_SETFD, FD_CLOEXEC);
+	}
+
 	/* New socket pair */
 	monitor_reinit(pmonitor);
 
@@ -456,6 +493,10 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 	if (pmonitor->m_pid == -1)
 		fatal("fork of unprivileged child failed");
 	else if (pmonitor->m_pid != 0) {
+		close(devnull);
+		for (i = 0; i < (int)(sizeof(hold) / sizeof(*hold)); i++)
+			close(hold[i]);
+
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
 		sshbuf_reset(loginmsg);
 		monitor_clear_keystate(ssh, pmonitor);
@@ -466,24 +507,48 @@ privsep_postauth(struct ssh *ssh, Authctxt *authctxt)
 	}
 
 	/* child */
-
 	close(pmonitor->m_sendfd);
-	pmonitor->m_sendfd = -1;
-
-	/* Demote the private keys to public keys. */
-	demote_sensitive_data();
-
-	/* Drop privileges */
-	do_setusercontext(authctxt->pw);
-
-	/* It is safe now to apply the key state */
-	monitor_apply_keystate(ssh, pmonitor);
+	close(pmonitor->m_log_recvfd);
 
 	/*
-	 * Tell the packet layer that authentication was successful, since
-	 * this information is not part of the key state.
+	 * Arrange unpriv-postauth child process fds:
+	 * 0, 1 network socket
+	 * 2 optional stderr
+	 * 3 reserved
+	 * 4 monitor message socket
+	 * 5 monitor logging socket
+	 * 6 configuration message socket
+	 *
+	 * We know that the monitor sockets will have fds > 4 because
+	 * of the reserved fds in hold[].
 	 */
-	ssh_packet_set_authenticated(ssh);
+
+	/* XXX simplify this by passing config via a monitor call */
+
+	/* Send configuration to ancestor sshd-monitor process */
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
+		fatal("socketpair: %s", strerror(errno));
+	send_privsep_state(ssh, config_s[0], cfg);
+
+	if (dup2(ssh_packet_get_connection_in(ssh),
+	    STDIN_FILENO) == -1)
+		debug3_f("dup2 stdin: %s", strerror(errno));
+	if (dup2(ssh_packet_get_connection_out(ssh),
+	    STDOUT_FILENO) == -1)
+		debug3_f("dup2 stdout: %s", strerror(errno));
+	/* leave stderr as-is */
+	log_redirect_stderr_to(NULL); /* dup can clobber log fd */
+	if (dup2(pmonitor->m_recvfd, PRIVSEP_MONITOR_FD) == -1)
+		debug3_f("dup2 PRIVSEP_MONITOR_FD: %s", strerror(errno));
+	if (dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
+		debug3_f("dup2 PRIVSEP_LOG_FD: %s", strerror(errno));
+	if (dup2(config_s[1], PRIVSEP_CONFIG_PASS_FD) == -1)
+		debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
+	closefrom(PRIVSEP_MIN_FREE_FD);
+
+	execv(options.sshd_privsep_postauth_path, saved_argv);
+	fatal_f("exec of %s failed: %s",
+	    options.sshd_privsep_postauth_path, strerror(errno));
 }
 
 static struct sshkey *
@@ -579,57 +644,6 @@ get_hostkey_index(struct sshkey *key, int compare, struct ssh *ssh)
 		}
 	}
 	return (-1);
-}
-
-/* Inform the client of all hostkeys */
-static void
-notify_hostkeys(struct ssh *ssh)
-{
-	struct sshbuf *buf;
-	struct sshkey *key;
-	u_int i, nkeys;
-	int r;
-	char *fp;
-
-	/* Some clients cannot cope with the hostkeys message, skip those. */
-	if (ssh->compat & SSH_BUG_HOSTKEYS)
-		return;
-
-	if ((buf = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new");
-	for (i = nkeys = 0; i < options.num_host_key_files; i++) {
-		key = get_hostkey_public_by_index(i, ssh);
-		if (key == NULL || key->type == KEY_UNSPEC ||
-		    sshkey_is_cert(key))
-			continue;
-		fp = sshkey_fingerprint(key, options.fingerprint_hash,
-		    SSH_FP_DEFAULT);
-		debug3_f("key %d: %s %s", i, sshkey_ssh_name(key), fp);
-		free(fp);
-		if (nkeys == 0) {
-			/*
-			 * Start building the request when we find the
-			 * first usable key.
-			 */
-			if ((r = sshpkt_start(ssh, SSH2_MSG_GLOBAL_REQUEST)) != 0 ||
-			    (r = sshpkt_put_cstring(ssh, "hostkeys-00@openssh.com")) != 0 ||
-			    (r = sshpkt_put_u8(ssh, 0)) != 0) /* want reply */
-				sshpkt_fatal(ssh, r, "%s: start request", __func__);
-		}
-		/* Append the key to the request */
-		sshbuf_reset(buf);
-		if ((r = sshkey_putb(key, buf)) != 0)
-			fatal_fr(r, "couldn't put hostkey %d", i);
-		if ((r = sshpkt_put_stringb(ssh, buf)) != 0)
-			sshpkt_fatal(ssh, r, "%s: append key", __func__);
-		nkeys++;
-	}
-	debug3_f("sent %u hostkeys", nkeys);
-	if (nkeys == 0)
-		fatal_f("no hostkeys");
-	if ((r = sshpkt_send(ssh)) != 0)
-		sshpkt_fatal(ssh, r, "%s: send", __func__);
-	sshbuf_free(buf);
 }
 
 static void
@@ -828,7 +842,6 @@ main(int ac, char **av)
 	const char *remote_ip, *rdomain;
 	char *line, *laddr, *logfile = NULL;
 	u_int i;
-	u_int64_t ibytes, obytes;
 	mode_t new_umask;
 	Authctxt *authctxt;
 	struct connection_info *connection_info = NULL;
@@ -1241,6 +1254,13 @@ main(int ac, char **av)
 	debug3("using %s for unprivileged preauth",
 	    options.sshd_privsep_preauth_path);
 
+	/* Identify binary for sshd-unpriv-postauth */
+	if (stat(options.sshd_privsep_postauth_path, &sb) != 0 ||
+	    !(sb.st_mode & (S_IXOTH|S_IXUSR))) {
+		fatal("%s does not exist or is not executable",
+		    options.sshd_privsep_postauth_path);
+	}
+
 	if (privsep_preauth(ssh) != 1)
 		fatal("privsep_preauth failed");
 
@@ -1265,31 +1285,13 @@ main(int ac, char **av)
 	 * In privilege separation, we fork another child and prepare
 	 * file descriptor passing.
 	 */
-	privsep_postauth(ssh, authctxt);
+	privsep_postauth(ssh);
 	/* the monitor process [priv] will not return */
-
-	ssh_packet_set_timeout(ssh, options.client_alive_interval,
-	    options.client_alive_count_max);
-
-	/* Try to send all our hostkeys to the client */
-	notify_hostkeys(ssh);
-
-	/* Start session. */
-	do_authenticated(ssh, authctxt);
-
-	/* The connection has been terminated. */
-	ssh_packet_get_bytes(ssh, &ibytes, &obytes);
-	verbose("Transferred: sent %llu, received %llu bytes",
-	    (unsigned long long)obytes, (unsigned long long)ibytes);
-
-	verbose("Closing connection to %.500s port %d", remote_ip, remote_port);
-	ssh_packet_close(ssh);
-
-	mm_terminate();
 
 	exit(0);
 }
 
+#if 0
 int
 sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
     struct sshkey *pubkey, u_char **signature, size_t *slenp,
@@ -1308,6 +1310,7 @@ sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
 	}
 	return 0;
 }
+#endif
 
 /* server specific fatal cleanup */
 void

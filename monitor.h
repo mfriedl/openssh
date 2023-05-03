@@ -77,7 +77,7 @@ void monitor_child_preauth(struct ssh *, struct monitor *);
 void monitor_child_postauth(struct ssh *, struct monitor *);
 
 void monitor_clear_keystate(struct ssh *, struct monitor *);
-void monitor_apply_keystate(struct ssh *, struct monitor *);
+struct sshbuf * monitor_get_keystate(void);
 
 /* Prototypes for request sending and receiving */
 void mm_request_send(int, enum monitor_reqtype, struct sshbuf *);

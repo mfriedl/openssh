@@ -290,7 +290,7 @@ monitor_child_preauth(struct ssh *ssh, struct monitor *pmonitor)
 		fatal_f("authentication method name unknown");
 
 	debug_f("user %s authenticated by privileged process", authctxt->user);
-	ssh->authctxt = NULL;
+	//ssh->authctxt = NULL;
 	ssh_packet_set_log_preamble(ssh, "user %s", authctxt->user);
 
 	mm_get_keystate(ssh, pmonitor);
@@ -1409,43 +1409,10 @@ monitor_clear_keystate(struct ssh *ssh, struct monitor *pmonitor)
 	child_state = NULL;
 }
 
-void
-monitor_apply_keystate(struct ssh *ssh, struct monitor *pmonitor)
+struct sshbuf *
+monitor_get_keystate(void)
 {
-	struct kex *kex;
-	int r;
-
-	debug3_f("packet_set_state");
-	if ((r = ssh_packet_set_state(ssh, child_state)) != 0)
-		fatal_fr(r, "packet_set_state");
-	sshbuf_free(child_state);
-	child_state = NULL;
-	if ((kex = ssh->kex) == NULL)
-		fatal_f("internal error: ssh->kex == NULL");
-	if (session_id2_len != sshbuf_len(ssh->kex->session_id)) {
-		fatal_f("incorrect session id length %zu (expected %u)",
-		    sshbuf_len(ssh->kex->session_id), session_id2_len);
-	}
-	if (memcmp(sshbuf_ptr(ssh->kex->session_id), session_id2,
-	    session_id2_len) != 0)
-		fatal_f("session ID mismatch");
-	/* XXX set callbacks */
-#ifdef WITH_OPENSSL
-	kex->kex[KEX_DH_GRP1_SHA1] = kex_gen_server;
-	kex->kex[KEX_DH_GRP14_SHA1] = kex_gen_server;
-	kex->kex[KEX_DH_GRP14_SHA256] = kex_gen_server;
-	kex->kex[KEX_DH_GRP16_SHA512] = kex_gen_server;
-	kex->kex[KEX_DH_GRP18_SHA512] = kex_gen_server;
-	kex->kex[KEX_DH_GEX_SHA1] = kexgex_server;
-	kex->kex[KEX_DH_GEX_SHA256] = kexgex_server;
-	kex->kex[KEX_ECDH_SHA2] = kex_gen_server;
-#endif
-	kex->kex[KEX_C25519_SHA256] = kex_gen_server;
-	kex->kex[KEX_KEM_SNTRUP761X25519_SHA512] = kex_gen_server;
-	kex->load_host_public_key=&get_hostkey_public_by_type;
-	kex->load_host_private_key=&get_hostkey_private_by_type;
-	kex->host_key_index=&get_hostkey_index;
-	kex->sign = sshd_hostkey_sign;
+	return child_state;
 }
 
 /* This function requires careful sanity checking */
@@ -1518,7 +1485,7 @@ monitor_init(void)
 void
 monitor_reinit(struct monitor *mon)
 {
-	monitor_openfds(mon, 0);
+	monitor_openfds(mon, 1);	/* X */
 }
 
 #ifdef GSSAPI

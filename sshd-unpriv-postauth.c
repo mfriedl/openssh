@@ -153,123 +153,13 @@ struct include_list includes = TAILQ_HEAD_INITIALIZER(includes);
 struct sshbuf *loginmsg;
 
 /* Prototypes for various functions defined later in this file. */
-static void do_ssh2_kex(struct ssh *);
+static void setup_ssh2_kex(struct ssh *);
 
 /* XXX stub */
 int
 mm_is_monitor(void)
 {
 	return 0;
-}
-
-static void
-privsep_child_demote(void)
-{
-	gid_t gidset[1];
-	struct passwd *pw;
-
-	/* Demote the child */
-	if (getuid() == 0 || geteuid() == 0) {
-		if ((pw = getpwnam(SSH_PRIVSEP_USER)) == NULL)
-			fatal("Privilege separation user %s does not exist",
-			    SSH_PRIVSEP_USER);
-		pw = pwcopy(pw); /* Ensure mutable */
-		endpwent();
-		freezero(pw->pw_passwd, strlen(pw->pw_passwd));
-
-		/* Change our root directory */
-		if (chroot(_PATH_PRIVSEP_CHROOT_DIR) == -1)
-			fatal("chroot(\"%s\"): %s", _PATH_PRIVSEP_CHROOT_DIR,
-			    strerror(errno));
-		if (chdir("/") == -1)
-			fatal("chdir(\"/\"): %s", strerror(errno));
-
-		/*
-		 * Drop our privileges
-		 * NB. Can't use setusercontext() after chroot.
-		 */
-		debug3("privsep user:group %u:%u", (u_int)pw->pw_uid,
-		    (u_int)pw->pw_gid);
-		gidset[0] = pw->pw_gid;
-		if (setgroups(1, gidset) == -1)
-			fatal("setgroups: %.100s", strerror(errno));
-		permanently_set_uid(pw);
-	}
-
-	/* sandbox ourselves */
-	if (pledge("stdio", NULL) == -1)
-		fatal_f("pledge()");
-}
-
-static void
-append_hostkey_type(struct sshbuf *b, const char *s)
-{
-	int r;
-
-	if (match_pattern_list(s, options.hostkeyalgorithms, 0) != 1) {
-		debug3_f("%s key not permitted by HostkeyAlgorithms", s);
-		return;
-	}
-	if ((r = sshbuf_putf(b, "%s%s", sshbuf_len(b) > 0 ? "," : "", s)) != 0)
-		fatal_fr(r, "sshbuf_putf");
-}
-
-static char *
-list_hostkey_types(void)
-{
-	struct sshbuf *b;
-	struct sshkey *key;
-	char *ret;
-	u_int i;
-
-	if ((b = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	for (i = 0; i < options.num_host_key_files; i++) {
-		key = host_pubkeys[i];
-		if (key == NULL)
-			continue;
-		switch (key->type) {
-		case KEY_RSA:
-			/* for RSA we also support SHA2 signatures */
-			append_hostkey_type(b, "rsa-sha2-512");
-			append_hostkey_type(b, "rsa-sha2-256");
-			/* FALLTHROUGH */
-		case KEY_DSA:
-		case KEY_ECDSA:
-		case KEY_ED25519:
-		case KEY_ECDSA_SK:
-		case KEY_ED25519_SK:
-		case KEY_XMSS:
-			append_hostkey_type(b, sshkey_ssh_name(key));
-			break;
-		}
-		/* If the private key has a cert peer, then list that too */
-		key = host_certificates[i];
-		if (key == NULL)
-			continue;
-		switch (key->type) {
-		case KEY_RSA_CERT:
-			/* for RSA we also support SHA2 signatures */
-			append_hostkey_type(b,
-			    "rsa-sha2-512-cert-v01@openssh.com");
-			append_hostkey_type(b,
-			    "rsa-sha2-256-cert-v01@openssh.com");
-			/* FALLTHROUGH */
-		case KEY_DSA_CERT:
-		case KEY_ECDSA_CERT:
-		case KEY_ED25519_CERT:
-		case KEY_ECDSA_SK_CERT:
-		case KEY_ED25519_SK_CERT:
-		case KEY_XMSS_CERT:
-			append_hostkey_type(b, sshkey_ssh_name(key));
-			break;
-		}
-	}
-	if ((ret = sshbuf_dup_string(b)) == NULL)
-		fatal_f("sshbuf_dup_string failed");
-	sshbuf_free(b);
-	debug_f("%s", ret);
-	return ret;
 }
 
 struct sshkey *
@@ -353,6 +243,57 @@ get_hostkey_index(struct sshkey *key, int compare, struct ssh *ssh)
 	return (-1);
 }
 
+/* Inform the client of all hostkeys */
+static void
+notify_hostkeys(struct ssh *ssh)
+{
+	struct sshbuf *buf;
+	struct sshkey *key;
+	u_int i, nkeys;
+	int r;
+	char *fp;
+
+	/* Some clients cannot cope with the hostkeys message, skip those. */
+	if (ssh->compat & SSH_BUG_HOSTKEYS)
+		return;
+
+	if ((buf = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new");
+	for (i = nkeys = 0; i < options.num_host_key_files; i++) {
+		key = get_hostkey_public_by_index(i, ssh);
+		if (key == NULL || key->type == KEY_UNSPEC ||
+		    sshkey_is_cert(key))
+			continue;
+		fp = sshkey_fingerprint(key, options.fingerprint_hash,
+		    SSH_FP_DEFAULT);
+		debug3_f("key %d: %s %s", i, sshkey_ssh_name(key), fp);
+		free(fp);
+		if (nkeys == 0) {
+			/*
+			 * Start building the request when we find the
+			 * first usable key.
+			 */
+			if ((r = sshpkt_start(ssh, SSH2_MSG_GLOBAL_REQUEST)) != 0 ||
+			    (r = sshpkt_put_cstring(ssh, "hostkeys-00@openssh.com")) != 0 ||
+			    (r = sshpkt_put_u8(ssh, 0)) != 0) /* want reply */
+				sshpkt_fatal(ssh, r, "%s: start request", __func__);
+		}
+		/* Append the key to the request */
+		sshbuf_reset(buf);
+		if ((r = sshkey_putb(key, buf)) != 0)
+			fatal_fr(r, "couldn't put hostkey %d", i);
+		if ((r = sshpkt_put_stringb(ssh, buf)) != 0)
+			sshpkt_fatal(ssh, r, "%s: append key", __func__);
+		nkeys++;
+	}
+	debug3_f("sent %u hostkeys", nkeys);
+	if (nkeys == 0)
+		fatal_f("no hostkeys");
+	if ((r = sshpkt_send(ssh)) != 0)
+		sshpkt_fatal(ssh, r, "%s: send", __func__);
+	sshbuf_free(buf);
+}
+
 static void
 usage(void)
 {
@@ -408,8 +349,11 @@ static void
 recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
     uint64_t *timing_secretp)
 {
-	struct sshbuf *m, *inc, *hostkeys;
+	Authctxt *authctxt;
+	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo;
+	struct passwd *pw;
 	u_char *cp, ver;
+	u_char *pw_name;
 	size_t len;
 	int r;
 	struct include_item *item;
@@ -417,6 +361,8 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	debug3_f("entering fd = %d", fd);
 
 	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
+		fatal_f("sshbuf_new failed");
+	if ((keystate = sshbuf_new()) == NULL || (authinfo = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 	if (ssh_msg_recv(fd, m) == -1)
 		fatal_f("ssh_msg_recv failed");
@@ -429,9 +375,9 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->client_version)) != 0 ||
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* keystate */
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* pw_name */
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* authinfo */
+	    (r = sshbuf_get_stringb(m, keystate)) != 0 ||
+	    (r = sshbuf_get_string(m, &pw_name, NULL)) != 0 ||
+	    (r = sshbuf_get_stringb(m, authinfo)) != 0 ||
 	    (r = sshbuf_get_stringb(m, inc)) != 0)
 		fatal_fr(r, "parse config");
 
@@ -451,9 +397,28 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 
 	parse_hostkeys(hostkeys);
 
+	debug3_f("packet_set_state");
+	if ((r = ssh_packet_set_state(ssh, keystate)) != 0)
+		fatal_fr(r, "packet_set_state");
+
+	/* set authctxt */
+	if ((authctxt = ssh->authctxt) == NULL)
+		fatal_f("no authctxt for user");
+	if ((pw = getpwnam(pw_name)) == NULL)
+		fatal_f("user %s does not exist", pw_name);
+	pw = pwcopy(pw); /* Ensure mutable */
+	endpwent();
+	freezero(pw->pw_passwd, strlen(pw->pw_passwd));
+	authctxt->pw = pw;
+	authctxt->user = pw_name;
+	authctxt->valid = 1;
+	authctxt->session_info = authinfo;
+
 	free(cp);
 	sshbuf_free(m);
 	sshbuf_free(hostkeys);
+	sshbuf_free(keystate);
+	sshbuf_free(inc);
 
 	debug3_f("done");
 }
@@ -468,9 +433,12 @@ main(int ac, char **av)
 	extern char *optarg;
 	extern int optind;
 	int r, opt, have_key = 0;
+	int remote_port;
 	int sock_in = -1, sock_out = -1, rexeced_flag = 0;
+	const char *remote_ip;
 	char *line, *logfile = NULL;
 	u_int i;
+	u_int64_t ibytes, obytes;
 	mode_t new_umask;
 	Authctxt *authctxt;
 	struct connection_info *connection_info = NULL;
@@ -601,9 +569,6 @@ main(int ac, char **av)
 		}
 	}
 
-	if (!rexeced_flag)
-		fatal("sshd-unpriv-preauth should not be executed directly");
-
 #ifdef WITH_OPENSSL
 	OpenSSL_add_all_algorithms();
 #endif
@@ -615,7 +580,7 @@ main(int ac, char **av)
 		snprintf(pid_s, sizeof(pid_s), "%ld", (unsigned long)getpid());
 		cp = percent_expand(logfile,
 		    "p", pid_s,
-		    "P", "sshd-unpriv-preauth",
+		    "P", "sshd-unpriv-postauth",
 		    (char *)NULL);
 		log_redirect_stderr_to(cp);
 		free(cp);
@@ -641,6 +606,9 @@ main(int ac, char **av)
 	}
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
+
+	if (!rexeced_flag)
+		fatal("sshd-unpriv-postauth should not be executed directly");
 
 	/* Connection passed by stdin/out */
 	if (inetd_flag) {
@@ -669,11 +637,18 @@ main(int ac, char **av)
 	ssh_packet_set_server(ssh);
 	pmonitor->m_pkex = &ssh->kex;
 
+	/* allocate authentication context */
+	authctxt = xcalloc(1, sizeof(*authctxt));
+	ssh->authctxt = authctxt;
+
+	/* XXX global for cleanup, access from other modules */
+	the_authctxt = authctxt;
+
 	/* Fetch our configuration */
 	/* XXX do this using the monitor instead of a separate fd */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
-	setproctitle("%s", "[unpriv-preauth-early]");
+	setproctitle("%s", "[unpriv-postauth-early]");
 	recv_privsep_state(ssh, PRIVSEP_CONFIG_PASS_FD, cfg, &timing_secret);
 	close(PRIVSEP_CONFIG_PASS_FD);
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
@@ -732,8 +707,7 @@ main(int ac, char **av)
 	if (chdir("/") == -1)
 		error("chdir(\"/\"): %s", strerror(errno));
 
-	/* This is the child processing a new connection. */
-	setproctitle("%s", "[unpriv]");
+	setproctitle("%s", "[unpriv-postauth]");
 
 	/* Executed child processes don't need these. */
 	fcntl(sock_out, F_SETFD, FD_CLOEXEC);
@@ -746,7 +720,6 @@ main(int ac, char **av)
 	ssh_signal(SIGQUIT, SIG_DFL);
 	ssh_signal(SIGCHLD, SIG_DFL);
 
-
 	/* Prepare the channels layer */
 	channel_init_channels(ssh);
 	channel_set_af(ssh, options.address_family);
@@ -755,44 +728,58 @@ main(int ac, char **av)
 
 	ssh_packet_set_nonblocking(ssh);
 
-	/* allocate authentication context */
-	authctxt = xcalloc(1, sizeof(*authctxt));
-	ssh->authctxt = authctxt;
+	if ((remote_port = ssh_remote_port(ssh)) < 0) {
+		debug("ssh_remote_port failed");
+		cleanup_exit(255);
+	}
 
-	/* XXX global for cleanup, access from other modules */
-	the_authctxt = authctxt;
+	/*
+	 * The rest of the code depends on the fact that
+	 * ssh_remote_ipaddr() caches the remote ip, even if
+	 * the socket goes away.
+	 */
+	remote_ip = ssh_remote_ipaddr(ssh);
 
 	/* Set default key authentication options */
 	if ((auth_opts = sshauthopt_new_with_keys_defaults()) == NULL)
 		fatal("allocation failed");
-
-	/* prepare buffer to collect messages to display to user after login */
-	if ((loginmsg = sshbuf_new()) == NULL)
-		fatal("sshbuf_new loginmsg failed");
-	auth_debug_reset();
-
-	/* Enable challenge-response authentication for privilege separation */
-	privsep_challenge_enable();
 
 #ifdef GSSAPI
 	/* Cache supported mechanism OIDs for later use */
 	ssh_gssapi_prepare_supported_oids();
 #endif
 
-	setproctitle("%s", "[unpriv-preauth]");
+	setproctitle("%s", "[unpriv-postauth]");
 
-	privsep_child_demote();
-
-	/* perform the key exchange */
-	/* authenticate user and start session */
-	do_ssh2_kex(ssh);
-	do_authentication2(ssh);
+	/* Drop privileges */
+	do_setusercontext(authctxt->pw);
 
 	/*
-	 * The unprivileged child now transfers the current keystate and exits.
+	 * Tell the packet layer that authentication was successful, since
+	 * this information is not part of the key state.
 	 */
-	mm_send_keystate(ssh, pmonitor);
-	ssh_packet_clear_keys(ssh);
+	ssh_packet_set_authenticated(ssh);
+
+	ssh_packet_set_timeout(ssh, options.client_alive_interval,
+	    options.client_alive_count_max);
+
+	setup_ssh2_kex(ssh);
+
+	/* Try to send all our hostkeys to the client */
+	notify_hostkeys(ssh);
+
+	/* Start session. */
+	do_authenticated(ssh, authctxt);
+
+	/* The connection has been terminated. */
+	ssh_packet_get_bytes(ssh, &ibytes, &obytes);
+	verbose("Transferred: sent %llu, received %llu bytes",
+	    (unsigned long long)obytes, (unsigned long long)ibytes);
+
+	verbose("Closing connection to %.500s port %d", remote_ip, remote_port);
+	ssh_packet_close(ssh);
+
+	mm_terminate();
 	exit(0);
 }
 
@@ -817,29 +804,13 @@ sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
 
 /* SSH2 key exchange */
 static void
-do_ssh2_kex(struct ssh *ssh)
+setup_ssh2_kex(struct ssh *ssh)
 {
-	char *hkalgs = NULL, *myproposal[PROPOSAL_MAX];
-	const char *compression = NULL;
 	struct kex *kex;
-	int r;
 
-	if (options.rekey_limit || options.rekey_interval)
-		ssh_packet_set_rekey_limits(ssh, options.rekey_limit,
-		    options.rekey_interval);
+	if ((kex = ssh->kex) == NULL)
+		fatal_f("internal error: ssh->kex == NULL");
 
-	if (options.compression == COMP_NONE)
-		compression = "none";
-	hkalgs = list_hostkey_types();
-
-	kex_proposal_populate_entries(ssh, myproposal, options.kex_algorithms,
-	    options.ciphers, options.macs, compression, hkalgs);
-
-	free(hkalgs);
-
-	/* start key exchange */
-	if ((r = kex_setup(ssh, myproposal)) != 0)
-		fatal_r(r, "kex_setup");
 	kex = ssh->kex;
 #ifdef WITH_OPENSSL
 	kex->kex[KEX_DH_GRP1_SHA1] = kex_gen_server;
@@ -857,19 +828,6 @@ do_ssh2_kex(struct ssh *ssh)
 	kex->load_host_private_key=&get_hostkey_private_by_type;
 	kex->host_key_index=&get_hostkey_index;
 	kex->sign = sshd_hostkey_sign;
-
-	ssh_dispatch_run_fatal(ssh, DISPATCH_BLOCK, &kex->done);
-
-#ifdef DEBUG_KEXDH
-	/* send 1st encrypted/maced/compressed message */
-	if ((r = sshpkt_start(ssh, SSH2_MSG_IGNORE)) != 0 ||
-	    (r = sshpkt_put_cstring(ssh, "markus")) != 0 ||
-	    (r = sshpkt_send(ssh)) != 0 ||
-	    (r = ssh_packet_write_wait(ssh)) != 0)
-		fatal_fr(r, "send test");
-#endif
-	kex_proposal_free_entries(myproposal);
-	debug("KEX done");
 }
 
 /* server specific fatal cleanup */
