@@ -706,6 +706,8 @@ do_login(struct ssh *ssh, Session *s, const char *command)
 	socklen_t fromlen;
 	struct sockaddr_storage from;
 
+debug_f("called");
+
 	/*
 	 * Get IP address of client. If the connection is not a socket, let
 	 * the address be 0.0.0.0.
@@ -713,19 +715,28 @@ do_login(struct ssh *ssh, Session *s, const char *command)
 	memset(&from, 0, sizeof(from));
 	fromlen = sizeof(from);
 	if (ssh_packet_connection_is_on_socket(ssh)) {
+debug_f("peername");
 		if (getpeername(ssh_packet_get_connection_in(ssh),
 		    (struct sockaddr *)&from, &fromlen) == -1) {
 			debug("getpeername: %.100s", strerror(errno));
 			cleanup_exit(255);
 		}
+debug_f("peername-ok");
 	}
 
-	if (check_quietlogin(s, command))
+debug_f("quiet");
+	if (check_quietlogin(s, command)) {
+debug_f("quiet-do");
 		return;
+	}
+debug_f("quiet-ok");
 
+debug_f("login-msg");
 	display_loginmsg();
+debug_f("login-msg-done");
 
 	do_motd();
+debug_f("done");
 }
 
 /*
@@ -758,13 +769,16 @@ check_quietlogin(Session *s, const char *command)
 	char buf[256];
 	struct passwd *pw = s->pw;
 	struct stat st;
+debug_f("called");
 
 	/* Return 1 if .hushlogin exists or a command given. */
 	if (command != NULL)
 		return 1;
 	snprintf(buf, sizeof(buf), "%.200s/.hushlogin", pw->pw_dir);
+debug_f("hush");
 	if (login_getcapbool(lc, "hushlogin", 0) || stat(buf, &st) >= 0)
 		return 1;
+debug_f("done");
 	return 0;
 }
 

@@ -1291,27 +1291,6 @@ main(int ac, char **av)
 	exit(0);
 }
 
-#if 0
-int
-sshd_hostkey_sign(struct ssh *ssh, struct sshkey *privkey,
-    struct sshkey *pubkey, u_char **signature, size_t *slenp,
-    const u_char *data, size_t dlen, const char *alg)
-{
-	if (privkey) {
-		if (mm_sshkey_sign(ssh, privkey, signature, slenp,
-		    data, dlen, alg, options.sk_provider, NULL,
-		    ssh->compat) < 0)
-			fatal_f("privkey sign failed");
-	} else {
-		if (mm_sshkey_sign(ssh, pubkey, signature, slenp,
-		    data, dlen, alg, options.sk_provider, NULL,
-		    ssh->compat) < 0)
-			fatal_f("pubkey sign failed");
-	}
-	return 0;
-}
-#endif
-
 /* server specific fatal cleanup */
 void
 cleanup_exit(int i)

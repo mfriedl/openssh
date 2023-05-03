@@ -49,6 +49,8 @@
 #include <unistd.h>
 #include <limits.h>
 
+#include <login_cap.h>	/* fixme */
+
 #ifdef WITH_OPENSSL
 #include <openssl/bn.h>
 #include <openssl/evp.h>
@@ -414,6 +416,10 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	authctxt->valid = 1;
 	authctxt->session_info = authinfo;
 
+	/* was a side effect of getpwnamallow in monitor */
+	extern login_cap_t *lc;			/* XXX */
+	lc = login_getclass(pw->pw_class);	/* XXX */
+
 	free(cp);
 	sshbuf_free(m);
 	sshbuf_free(hostkeys);
@@ -644,6 +650,9 @@ main(int ac, char **av)
 	/* XXX global for cleanup, access from other modules */
 	the_authctxt = authctxt;
 
+	if ((loginmsg = sshbuf_new()) == NULL)	/* XXX */
+		fatal("sshbuf_new loginmsg failed");
+
 	/* Fetch our configuration */
 	/* XXX do this using the monitor instead of a separate fd */
 	if ((cfg = sshbuf_new()) == NULL)
@@ -767,6 +776,8 @@ main(int ac, char **av)
 
 	/* Try to send all our hostkeys to the client */
 	notify_hostkeys(ssh);
+
+//kill(getpid(), SIGSTOP);
 
 	/* Start session. */
 	do_authenticated(ssh, authctxt);
