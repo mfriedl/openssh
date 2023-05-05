@@ -352,7 +352,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
     uint64_t *timing_secretp)
 {
 	Authctxt *authctxt;
-	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo;
+	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo, *opts;
 	struct passwd *pw;
 	u_char *cp, ver;
 	u_char *pw_name;
@@ -380,6 +380,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	    (r = sshbuf_get_stringb(m, keystate)) != 0 ||
 	    (r = sshbuf_get_string(m, &pw_name, NULL)) != 0 ||
 	    (r = sshbuf_get_stringb(m, authinfo)) != 0 ||
+	    (r = sshbuf_froms(m, &opts)) != 0 ||
 	    (r = sshbuf_get_stringb(m, inc)) != 0)
 		fatal_fr(r, "parse config");
 
@@ -398,6 +399,9 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	}
 
 	parse_hostkeys(hostkeys);
+
+	if ((r = sshauthopt_deserialise(opts, &auth_opts)) != 0)
+		fatal_fr(r, "sshauthopt_deserialise failed");
 
 	debug3_f("packet_set_state");
 	if ((r = ssh_packet_set_state(ssh, keystate)) != 0)
@@ -425,6 +429,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	sshbuf_free(hostkeys);
 	sshbuf_free(keystate);
 	sshbuf_free(inc);
+	sshbuf_free(opts);
 
 	debug3_f("done");
 }
@@ -643,6 +648,10 @@ main(int ac, char **av)
 	ssh_packet_set_server(ssh);
 	pmonitor->m_pkex = &ssh->kex;
 
+	/* Set default key authentication options */
+	if ((auth_opts = sshauthopt_new_with_keys_defaults()) == NULL)
+		fatal("allocation failed");
+
 	/* allocate authentication context */
 	authctxt = xcalloc(1, sizeof(*authctxt));
 	ssh->authctxt = authctxt;
@@ -748,10 +757,6 @@ main(int ac, char **av)
 	 * the socket goes away.
 	 */
 	remote_ip = ssh_remote_ipaddr(ssh);
-
-	/* Set default key authentication options */
-	if ((auth_opts = sshauthopt_new_with_keys_defaults()) == NULL)
-		fatal("allocation failed");
 
 #ifdef GSSAPI
 	/* Cache supported mechanism OIDs for later use */

@@ -432,6 +432,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* keystate */
 	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* pw_name */
 	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* authinfo */
+	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* auth_opts */
 	    (r = sshbuf_get_stringb(m, inc)) != 0)
 		fatal_fr(r, "parse config");
 

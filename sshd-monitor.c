@@ -286,7 +286,7 @@ pack_hostkeys(void)
 static void
 send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 {
-	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL;
+	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL, *opts = NULL;
 	struct include_item *item = NULL;
 	Authctxt *authctxt = ssh->authctxt;
 	char *pw_name = NULL;
@@ -296,7 +296,9 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	debug3_f("entering fd = %d config len %zu", fd,
 	    sshbuf_len(conf));
 
-	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
+	if ((m = sshbuf_new()) == NULL ||
+	    (inc = sshbuf_new()) == NULL ||
+	    (opts = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 
 	/* XXX unneccessary? */
@@ -309,6 +311,9 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	}
 
 	hostkeys = pack_hostkeys();
+	if (authctxt != NULL && auth_opts != NULL &&
+	    (r = sshauthopt_serialise(auth_opts, opts, 0)) != 0)
+		fatal_fr(r, "sshauthopt_serialise failed");
 
 	/* authenticated user (postauth) */
 	if (authctxt && authctxt->pw && authctxt->authenticated) {
@@ -331,6 +336,7 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	 *	string  keystate (postauth)
 	 *	string  authenticated_user (postauth)
 	 *	string  session_info (postauth)
+	 *	string  authopts (postauth)
 	 *	string	included_files[] {
 	 *		string	selector
 	 *		string	filename
@@ -345,6 +351,7 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 	    (r = sshbuf_put_stringb(m, monitor_get_keystate())) != 0 ||
 	    (r = sshbuf_put_string(m, pw_name, pw_len)) != 0 ||
 	    (r = sshbuf_put_stringb(m, authctxt ? authctxt->session_info : NULL)) != 0 ||
+	    (r = sshbuf_put_stringb(m, opts)) != 0 ||
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
 	if (ssh_msg_send(fd, 0, m) == -1)
@@ -352,6 +359,7 @@ send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
 
 	sshbuf_free(m);
 	sshbuf_free(inc);
+	sshbuf_free(opts);
 
 	debug3_f("done");
 }
