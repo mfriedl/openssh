@@ -466,8 +466,7 @@ privsep_preauth(struct ssh *ssh)
 static void
 privsep_postauth(struct ssh *ssh)
 {
-	int devnull, i, hold[3], status, r, config_s[2];
-	pid_t pid;
+	int devnull, i, hold[3], config_s[2];
 
 debug_f("pkt %d/%d",
 ssh_packet_get_connection_in(ssh),
