@@ -457,6 +457,7 @@ privsep_preauth(struct ssh *ssh)
 			debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
 		closefrom(PRIVSEP_MIN_FREE_FD);
 
+		saved_argv[0] = options.sshd_privsep_preauth_path;
 		execv(options.sshd_privsep_preauth_path, saved_argv);
 		fatal_f("exec of %s failed: %s",
 		    options.sshd_privsep_preauth_path, strerror(errno));
@@ -545,6 +546,7 @@ ssh_packet_get_connection_out(ssh));
 		debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
 	closefrom(PRIVSEP_MIN_FREE_FD);
 
+	saved_argv[0] = options.sshd_privsep_postauth_path;
 	execv(options.sshd_privsep_postauth_path, saved_argv);
 	fatal_f("exec of %s failed: %s",
 	    options.sshd_privsep_postauth_path, strerror(errno));
