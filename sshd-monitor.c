@@ -1146,14 +1146,6 @@ main(int ac, char **av)
 	/* This is the child processing a new connection. */
 	setproctitle("%s", "[accepted]");
 
-	/*
-	 * Create a new session and process group since the 4.4BSD
-	 * setlogin() affects the entire process group.  We don't
-	 * want the child to be able to affect the parent.
-	 */
-	if (!debug_flag && !inetd_flag && setsid() == -1)
-		error("setsid: %.100s", strerror(errno));
-
 	/* Executed child processes don't need these. */
 	fcntl(sock_out, F_SETFD, FD_CLOEXEC);
 	fcntl(sock_in, F_SETFD, FD_CLOEXEC);
