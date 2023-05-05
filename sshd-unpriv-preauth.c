@@ -598,6 +598,9 @@ main(int ac, char **av)
 		}
 	}
 
+	if (!rexeced_flag)
+		fatal("sshd-unpriv-preauth should not be executed directly");
+
 #ifdef WITH_OPENSSL
 	OpenSSL_add_all_algorithms();
 #endif
@@ -635,9 +638,6 @@ main(int ac, char **av)
 	}
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
-
-	if (!rexeced_flag)
-		fatal("sshd-unpriv-preauth should not be executed directly");
 
 	/* Connection passed by stdin/out */
 	if (inetd_flag) {
