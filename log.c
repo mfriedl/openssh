@@ -427,9 +427,9 @@ sshlogv(const char *file, const char *func, int line, int showfunc,
 	const char *cp;
 	size_t i;
 
-	snprintf(tag, sizeof(tag), "%.48s:%.48s():%d (pid=%ld)",
+	snprintf(tag, sizeof(tag), "%.48s:%.48s():%d (bin=%s, pid=%ld)",
 	    (cp = strrchr(file, '/')) == NULL ? file : cp + 1, func, line,
-	    (long)getpid());
+	    argv0, (long)getpid());
 	for (i = 0; i < nlog_verbose; i++) {
 		if (match_pattern_list(tag, log_verbose[i], 0) == 1) {
 			forced = 1;
