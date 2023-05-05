@@ -269,6 +269,7 @@ TAILQ_HEAD(include_list, include_item);
 		M_CP_STROPT(banner); \
 		M_CP_STROPT(trusted_user_ca_keys); \
 		M_CP_STROPT(revoked_keys_file); \
+		M_CP_STROPT(adm_forced_command); \
 		M_CP_STROPT(authorized_keys_command); \
 		M_CP_STROPT(authorized_keys_command_user); \
 		M_CP_STROPT(authorized_principals_file); \
