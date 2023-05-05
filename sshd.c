@@ -178,9 +178,6 @@ static int startup_pipe = -1;		/* in child */
 Authctxt *the_authctxt = NULL;
 struct ssh *the_active_state;
 
-/* global key/cert auth options. XXX move to permanent ssh->authctxt? */
-struct sshauthopt *auth_opts = NULL;
-
 /* sshd_config buffer */
 struct sshbuf *cfg;
 
