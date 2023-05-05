@@ -136,7 +136,6 @@ u_int utmp_len = HOST_NAME_MAX+1;
 
 /* variables used for privilege separation */
 struct monitor *pmonitor = NULL;
-int privsep_is_preauth = 1;
 
 /* global connection state and authentication contexts */
 Authctxt *the_authctxt = NULL;
