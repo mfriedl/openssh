@@ -349,10 +349,11 @@ parse_hostkeys(struct sshbuf *hostkeys)
 
 static void
 recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
-    uint64_t *timing_secretp)
+    struct sshbuf **active_confp, uint64_t *timing_secretp)
 {
 	Authctxt *authctxt;
-	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo, *opts;
+	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo;
+	struct sshbuf *opts;
 	struct passwd *pw;
 	u_char *cp, ver;
 	u_char *pw_name;
@@ -373,6 +374,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	if (ver != 0)
 		fatal_f("rexec version mismatch");
 	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 ||
+	    (r = sshbuf_froms(m, active_confp)) != 0 ||
 	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
 	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||
@@ -455,6 +457,7 @@ main(int ac, char **av)
 	struct connection_info *connection_info = NULL;
 	sigset_t sigmask;
 	uint64_t timing_secret = 0;
+	struct sshbuf *active_cfg = NULL;
 
 	closefrom(PRIVSEP_MIN_FREE_FD);
 	sigemptyset(&sigmask);
@@ -667,12 +670,15 @@ main(int ac, char **av)
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[unpriv-postauth-early]");
-	recv_privsep_state(ssh, PRIVSEP_CONFIG_PASS_FD, cfg, &timing_secret);
+	recv_privsep_state(ssh, PRIVSEP_CONFIG_PASS_FD, cfg, &active_cfg,
+	    &timing_secret);
 	close(PRIVSEP_CONFIG_PASS_FD);
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
 	options.timing_secret = timing_secret; /* XXX eliminate from unpriv */
+	mm_decode_activate_server_options(ssh, active_cfg);
+	sshbuf_free(active_cfg);
 
 #ifdef WITH_OPENSSL
 	if (options.moduli_file != NULL)

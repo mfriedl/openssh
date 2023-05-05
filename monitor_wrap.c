@@ -133,8 +133,10 @@ mm_request_receive(int sock, struct sshbuf *m)
 	debug3_f("entering");
 
 	if (atomicio(read, sock, buf, sizeof(buf)) != sizeof(buf)) {
-		if (errno == EPIPE)
+		if (errno == EPIPE) {
+			debug3_f("monitor fd closed");
 			cleanup_exit(255);
+		}
 		fatal_f("read: %s", strerror(errno));
 	}
 	msg_len = PEEK_U32(buf);
@@ -228,6 +230,49 @@ mm_sshkey_sign(struct ssh *ssh, struct sshkey *key, u_char **sigp, size_t *lenp,
 	return (0);
 }
 
+void
+mm_decode_activate_server_options(struct ssh *ssh, struct sshbuf *m)
+{
+	const u_char *p;
+	size_t len;
+	u_int i;
+	ServerOptions *newopts;
+	int r;
+
+	if ((r = sshbuf_get_string_direct(m, &p, &len)) != 0)
+		fatal_fr(r, "parse opts");
+	if (len != sizeof(*newopts))
+		fatal_f("option block size mismatch");
+	newopts = xcalloc(sizeof(*newopts), 1);
+	memcpy(newopts, p, sizeof(*newopts));
+
+#define M_CP_STROPT(x) do { \
+		if (newopts->x != NULL && \
+		    (r = sshbuf_get_cstring(m, &newopts->x, NULL)) != 0) \
+			fatal_fr(r, "parse %s", #x); \
+	} while (0)
+#define M_CP_STRARRAYOPT(x, nx) do { \
+		newopts->x = newopts->nx == 0 ? \
+		    NULL : xcalloc(newopts->nx, sizeof(*newopts->x)); \
+		for (i = 0; i < newopts->nx; i++) { \
+			if ((r = sshbuf_get_cstring(m, \
+			    &newopts->x[i], NULL)) != 0) \
+				fatal_fr(r, "parse %s", #x); \
+		} \
+	} while (0)
+	/* See comment in servconf.h */
+	COPY_MATCH_STRING_OPTS();
+#undef M_CP_STROPT
+#undef M_CP_STRARRAYOPT
+
+	copy_set_server_options(&options, newopts, 1);
+	log_change_level(options.log_level);
+	log_verbose_reset();
+	for (i = 0; i < options.num_log_verbose; i++)
+		log_verbose_add(options.log_verbose[i]);
+	free(newopts);
+}
+
 #define GETPW(b, id) \
 	do { \
 		if ((r = sshbuf_get_string_direct(b, &p, &len)) != 0) \
@@ -243,8 +288,6 @@ mm_getpwnamallow(struct ssh *ssh, const char *username)
 	struct sshbuf *m;
 	struct passwd *pw;
 	size_t len;
-	u_int i;
-	ServerOptions *newopts;
 	int r;
 	u_char ok;
 	const u_char *p;
@@ -283,40 +326,9 @@ mm_getpwnamallow(struct ssh *ssh, const char *username)
 
 out:
 	/* copy options block as a Match directive may have changed some */
-	if ((r = sshbuf_get_string_direct(m, &p, &len)) != 0)
-		fatal_fr(r, "parse opts");
-	if (len != sizeof(*newopts))
-		fatal_f("option block size mismatch");
-	newopts = xcalloc(sizeof(*newopts), 1);
-	memcpy(newopts, p, sizeof(*newopts));
-
-#define M_CP_STROPT(x) do { \
-		if (newopts->x != NULL && \
-		    (r = sshbuf_get_cstring(m, &newopts->x, NULL)) != 0) \
-			fatal_fr(r, "parse %s", #x); \
-	} while (0)
-#define M_CP_STRARRAYOPT(x, nx) do { \
-		newopts->x = newopts->nx == 0 ? \
-		    NULL : xcalloc(newopts->nx, sizeof(*newopts->x)); \
-		for (i = 0; i < newopts->nx; i++) { \
-			if ((r = sshbuf_get_cstring(m, \
-			    &newopts->x[i], NULL)) != 0) \
-				fatal_fr(r, "parse %s", #x); \
-		} \
-	} while (0)
-	/* See comment in servconf.h */
-	COPY_MATCH_STRING_OPTS();
-#undef M_CP_STROPT
-#undef M_CP_STRARRAYOPT
-
-	copy_set_server_options(&options, newopts, 1);
-	log_change_level(options.log_level);
-	log_verbose_reset();
-	for (i = 0; i < options.num_log_verbose; i++)
-		log_verbose_add(options.log_verbose[i]);
+	mm_decode_activate_server_options(ssh, m);
 	process_permitopen(ssh, &options);
 	process_channel_timeouts(ssh, &options);
-	free(newopts);
 
 	sshbuf_free(m);
 

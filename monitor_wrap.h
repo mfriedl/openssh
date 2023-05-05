@@ -58,6 +58,8 @@ int mm_hostbased_key_allowed(struct ssh *, struct passwd *, const char *,
 int mm_sshkey_verify(const struct sshkey *, const u_char *, size_t,
     const u_char *, size_t, const char *, u_int, struct sshkey_sig_details **);
 
+void mm_decode_activate_server_options(struct ssh *ssh, struct sshbuf *m);
+
 #ifdef GSSAPI
 OM_uint32 mm_ssh_gssapi_server_ctx(Gssctxt **, gss_OID);
 OM_uint32 mm_ssh_gssapi_accept_ctx(Gssctxt *,

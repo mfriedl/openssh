@@ -425,6 +425,7 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	if (ver != 0)
 		fatal_f("rexec version mismatch");
 	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 ||
+	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* confdata */
 	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
 	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||

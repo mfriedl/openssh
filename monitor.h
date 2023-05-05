@@ -59,6 +59,7 @@ enum monitor_reqtype {
 };
 
 struct ssh;
+struct sshbuf;
 
 struct monitor {
 	int			 m_recvfd;
@@ -84,5 +85,8 @@ void mm_request_send(int, enum monitor_reqtype, struct sshbuf *);
 void mm_request_receive(int, struct sshbuf *);
 void mm_request_receive_expect(int, enum monitor_reqtype, struct sshbuf *);
 void mm_get_keystate(struct ssh *, struct monitor *);
+
+/* XXX: should be returned via a monitor call rather than config_fd */
+void mm_encode_server_options(struct sshbuf *);
 
 #endif /* _MONITOR_H_ */
