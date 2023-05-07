@@ -101,8 +101,7 @@
 /* Privsep fds */
 #define PRIVSEP_MONITOR_FD		(STDERR_FILENO + 1)
 #define PRIVSEP_LOG_FD			(STDERR_FILENO + 2)
-#define PRIVSEP_CONFIG_PASS_FD		(STDERR_FILENO + 3)
-#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 4)
+#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 3)
 
 extern char *__progname;
 
@@ -244,7 +243,7 @@ demote_sensitive_data(void)
 	}
 }
 
-static struct sshbuf *
+struct sshbuf *
 pack_hostkeys(void)
 {
 	struct sshbuf *keybuf = NULL, *hostkeys = NULL;
@@ -281,100 +280,10 @@ pack_hostkeys(void)
 	return hostkeys;
 }
 
-/* XXX simplify this by passing using a monitor call */
-static void
-send_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf)
-{
-	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL;
-	struct sshbuf *opts = NULL, *confdata = NULL;
-	struct include_item *item = NULL;
-	Authctxt *authctxt = ssh->authctxt;
-	char *pw_name = NULL;
-	size_t pw_len = 0;
-	int r;
-
-	debug3_f("entering fd = %d config len %zu", fd,
-	    sshbuf_len(conf));
-
-	if ((m = sshbuf_new()) == NULL ||
-	    (inc = sshbuf_new()) == NULL ||
-	    (opts = sshbuf_new()) == NULL ||
-	    (confdata = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-
-	/* XXX unneccessary? */
-	/* pack includes into a string */
-	TAILQ_FOREACH(item, &includes, entry) {
-		if ((r = sshbuf_put_cstring(inc, item->selector)) != 0 ||
-		    (r = sshbuf_put_cstring(inc, item->filename)) != 0 ||
-		    (r = sshbuf_put_stringb(inc, item->contents)) != 0)
-			fatal_fr(r, "compose includes");
-	}
-
-	hostkeys = pack_hostkeys();
-	if (authctxt != NULL && auth_opts != NULL &&
-	    (r = sshauthopt_serialise(auth_opts, opts, 0)) != 0)
-		fatal_fr(r, "sshauthopt_serialise failed");
-
-	if (authctxt != NULL)
-		mm_encode_server_options(confdata);
-
-	/* authenticated user (postauth) */
-	if (authctxt && authctxt->pw && authctxt->authenticated) {
-		if ((pw_name = authctxt->pw->pw_name) != NULL)
-			pw_len = strlen(pw_name);
-	}
-
-	debug3_f("send user len %zu", pw_len);
-
-	/*
-	 * Protocol from monitor to unpriv privsep process:
-	 *	string	configuration
-	 *	string	configuration_data (postauth)
-	 *	uint64	timing_secret	XXX move delays to monitor and remove
-	 *	string	host_keys[] {
-	 *		string public_key
-	 *		string certificate
-	 *	}
-	 *	string  server_banner
-	 *	string  client_banner
-	 *	string  keystate (postauth)
-	 *	string  authenticated_user (postauth)
-	 *	string  session_info (postauth)
-	 *	string  authopts (postauth)
-	 *	string	included_files[] {
-	 *		string	selector
-	 *		string	filename
-	 *		string	contents
-	 *	}
-	 */
-	if ((r = sshbuf_put_stringb(m, conf)) != 0 ||
-	    (r = sshbuf_put_stringb(m, confdata)) != 0 ||
-	    (r = sshbuf_put_u64(m, options.timing_secret)) != 0 ||
-	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
-	    (r = sshbuf_put_stringb(m, ssh->kex->server_version)) != 0 ||
-	    (r = sshbuf_put_stringb(m, ssh->kex->client_version)) != 0 ||
-	    (r = sshbuf_put_stringb(m, monitor_get_keystate())) != 0 ||
-	    (r = sshbuf_put_string(m, pw_name, pw_len)) != 0 ||
-	    (r = sshbuf_put_stringb(m, authctxt ? authctxt->session_info : NULL)) != 0 ||
-	    (r = sshbuf_put_stringb(m, opts)) != 0 ||
-	    (r = sshbuf_put_stringb(m, inc)) != 0)
-		fatal_fr(r, "compose config");
-	if (ssh_msg_send(fd, 0, m) == -1)
-		error_f("ssh_msg_send failed");
-
-	sshbuf_free(m);
-	sshbuf_free(inc);
-	sshbuf_free(opts);
-	sshbuf_free(confdata);
-
-	debug3_f("done");
-}
-
 static int
 privsep_preauth(struct ssh *ssh)
 {
-	int devnull, i, hold[3], status, r, config_s[2], opt;
+	int devnull, i, hold[3], status, r;
 	pid_t pid;
 
 	/*
@@ -443,24 +352,10 @@ privsep_preauth(struct ssh *ssh)
 		 * 3 reserved
 		 * 4 monitor message socket
 		 * 5 monitor logging socket
-		 * 6 configuration message socket
 		 *
 		 * We know that the monitor sockets will have fds > 4 because
 		 * of the reserved fds in hold[].
 		 */
-
-		/* XXX simplify this by passing config via a monitor call */
-
-		/* Send configuration to ancestor sshd-monitor process */
-		if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
-			fatal("socketpair: %s", strerror(errno));
-		/* XXX hack: need to move stuff to monitor calls */
-		opt = 128*1024;
-		if (setsockopt(config_s[0], SOL_SOCKET, SO_SNDBUF,
-		    &opt, sizeof opt) == -1)
-			fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
-
-		send_privsep_state(ssh, config_s[0], cfg);
 
 		if (dup2(ssh_packet_get_connection_in(ssh),
 		    STDIN_FILENO) == -1)
@@ -474,8 +369,6 @@ privsep_preauth(struct ssh *ssh)
 			debug3_f("dup2 PRIVSEP_MONITOR_FD: %s", strerror(errno));
 		if (dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
 			debug3_f("dup2 PRIVSEP_LOG_FD: %s", strerror(errno));
-		if (dup2(config_s[1], PRIVSEP_CONFIG_PASS_FD) == -1)
-			debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
 		closefrom(PRIVSEP_MIN_FREE_FD);
 
 		saved_argv[0] = options.sshd_privsep_preauth_path;
@@ -488,11 +381,7 @@ privsep_preauth(struct ssh *ssh)
 static void
 privsep_postauth(struct ssh *ssh)
 {
-	int devnull, i, hold[3], config_s[2], opt;
-
-debug_f("pkt %d/%d",
-ssh_packet_get_connection_in(ssh),
-ssh_packet_get_connection_out(ssh));
+	int devnull, i, hold[3];
 
 	/*
 	 * We need to ensure that we don't assign the monitor fds to
@@ -520,7 +409,6 @@ ssh_packet_get_connection_out(ssh));
 
 		verbose("User child is on pid %ld", (long)pmonitor->m_pid);
 		sshbuf_reset(loginmsg);
-		monitor_clear_keystate(ssh, pmonitor);
 		monitor_child_postauth(ssh, pmonitor);
 
 		/* NEVERREACHED */
@@ -538,23 +426,10 @@ ssh_packet_get_connection_out(ssh));
 	 * 3 reserved
 	 * 4 monitor message socket
 	 * 5 monitor logging socket
-	 * 6 configuration message socket
 	 *
 	 * We know that the monitor sockets will have fds > 4 because
 	 * of the reserved fds in hold[].
 	 */
-
-	/* XXX simplify this by passing config via a monitor call */
-
-	/* Send configuration to ancestor sshd-monitor process */
-	if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
-		fatal("socketpair: %s", strerror(errno));
-	/* XXX hack: need to move stuff to monitor calls */
-	opt = 128*1024;
-	if (setsockopt(config_s[0], SOL_SOCKET, SO_SNDBUF,
-	    &opt, sizeof opt) == -1)
-		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
-	send_privsep_state(ssh, config_s[0], cfg);
 
 	if (dup2(ssh_packet_get_connection_in(ssh),
 	    STDIN_FILENO) == -1)
@@ -568,8 +443,6 @@ ssh_packet_get_connection_out(ssh));
 		debug3_f("dup2 PRIVSEP_MONITOR_FD: %s", strerror(errno));
 	if (dup2(pmonitor->m_log_sendfd, PRIVSEP_LOG_FD) == -1)
 		debug3_f("dup2 PRIVSEP_LOG_FD: %s", strerror(errno));
-	if (dup2(config_s[1], PRIVSEP_CONFIG_PASS_FD) == -1)
-		debug3_f("dup2 PRIVSEP_CONFIG_PASS_FD: %s", strerror(errno));
 	closefrom(PRIVSEP_MIN_FREE_FD);
 
 	saved_argv[0] = options.sshd_privsep_postauth_path;

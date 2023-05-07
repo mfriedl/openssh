@@ -97,8 +97,7 @@
 /* Privsep fds */
 #define PRIVSEP_MONITOR_FD		(STDERR_FILENO + 1)
 #define PRIVSEP_LOG_FD			(STDERR_FILENO + 2)
-#define PRIVSEP_CONFIG_PASS_FD		(STDERR_FILENO + 3)
-#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 4)
+#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 3)
 
 extern char *__progname;
 
@@ -346,57 +345,22 @@ parse_hostkeys(struct sshbuf *hostkeys)
 }
 
 static void
-recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
+recv_privsep_state(struct ssh *ssh, struct sshbuf *conf,
     struct sshbuf **active_confp, uint64_t *timing_secretp)
 {
 	Authctxt *authctxt;
-	struct sshbuf *m, *inc, *hostkeys, *keystate, *authinfo;
-	struct sshbuf *opts;
+	struct sshbuf *hostkeys = NULL, *keystate = NULL;
+	struct sshbuf *authinfo = NULL, *opts = NULL;
 	struct passwd *pw;
-	u_char *cp, ver;
 	u_char *pw_name;
-	size_t len;
 	int r;
-	struct include_item *item;
 
-	debug3_f("entering fd = %d", fd);
+	debug3_f("begin");
 
-	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	if ((keystate = sshbuf_new()) == NULL || (authinfo = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	if (ssh_msg_recv(fd, m) == -1)
-		fatal_f("ssh_msg_recv failed");
-	if ((r = sshbuf_get_u8(m, &ver)) != 0)
-		fatal_fr(r, "parse version");
-	if (ver != 0)
-		fatal_f("rexec version mismatch");
-	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 ||
-	    (r = sshbuf_froms(m, active_confp)) != 0 ||
-	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
-	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
-	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||
-	    (r = sshbuf_get_stringb(m, ssh->kex->client_version)) != 0 ||
-	    (r = sshbuf_get_stringb(m, keystate)) != 0 ||
-	    (r = sshbuf_get_string(m, &pw_name, NULL)) != 0 ||
-	    (r = sshbuf_get_stringb(m, authinfo)) != 0 ||
-	    (r = sshbuf_froms(m, &opts)) != 0 ||
-	    (r = sshbuf_get_stringb(m, inc)) != 0)
-		fatal_fr(r, "parse config");
+	mm_get_state(ssh, &includes, conf, active_confp, timing_secretp,
+	    &hostkeys, &keystate, &pw_name, &authinfo, &opts);
 
-	if (conf != NULL && (r = sshbuf_put(conf, cp, len)))
-		fatal_fr(r, "sshbuf_put");
-
-	while (sshbuf_len(inc) != 0) {
-		item = xcalloc(1, sizeof(*item));
-		if ((item->contents = sshbuf_new()) == NULL)
-			fatal_f("sshbuf_new failed");
-		if ((r = sshbuf_get_cstring(inc, &item->selector, NULL)) != 0 ||
-		    (r = sshbuf_get_cstring(inc, &item->filename, NULL)) != 0 ||
-		    (r = sshbuf_get_stringb(inc, item->contents)) != 0)
-			fatal_fr(r, "parse includes");
-		TAILQ_INSERT_TAIL(&includes, item, entry);
-	}
+	debug_f("keystate %zu", sshbuf_len(keystate));
 
 	parse_hostkeys(hostkeys);
 
@@ -424,11 +388,8 @@ recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
 	extern login_cap_t *lc;			/* XXX */
 	lc = login_getclass(pw->pw_class);	/* XXX */
 
-	free(cp);
-	sshbuf_free(m);
 	sshbuf_free(hostkeys);
 	sshbuf_free(keystate);
-	sshbuf_free(inc);
 	sshbuf_free(opts);
 
 	debug3_f("done");
@@ -664,13 +625,12 @@ main(int ac, char **av)
 		fatal("sshbuf_new loginmsg failed");
 
 	/* Fetch our configuration */
-	/* XXX do this using the monitor instead of a separate fd */
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[unpriv-postauth-early]");
-	recv_privsep_state(ssh, PRIVSEP_CONFIG_PASS_FD, cfg, &active_cfg,
-	    &timing_secret);
-	close(PRIVSEP_CONFIG_PASS_FD);
+
+	recv_privsep_state(ssh, cfg, &active_cfg, &timing_secret);
+
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);

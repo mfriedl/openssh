@@ -95,8 +95,7 @@
 /* Privsep fds */
 #define PRIVSEP_MONITOR_FD		(STDERR_FILENO + 1)
 #define PRIVSEP_LOG_FD			(STDERR_FILENO + 2)
-#define PRIVSEP_CONFIG_PASS_FD		(STDERR_FILENO + 3)
-#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 4)
+#define PRIVSEP_MIN_FREE_FD		(STDERR_FILENO + 3)
 
 extern char *__progname;
 
@@ -403,58 +402,17 @@ parse_hostkeys(struct sshbuf *hostkeys)
 }
 
 static void
-recv_privsep_state(struct ssh *ssh, int fd, struct sshbuf *conf,
+recv_privsep_state(struct ssh *ssh, struct sshbuf *conf,
     uint64_t *timing_secretp)
 {
-	struct sshbuf *m, *inc, *hostkeys;
-	u_char *cp, ver;
-	size_t len;
-	int r;
-	struct include_item *item;
+	struct sshbuf *hostkeys;
 
-	debug3_f("entering fd = %d", fd);
+	debug3_f("begin");
 
-	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-	if (ssh_msg_recv(fd, m) == -1)
-		fatal_f("ssh_msg_recv failed");
-	if ((r = sshbuf_get_u8(m, &ver)) != 0)
-		fatal_fr(r, "parse version");
-	if (ver != 0)
-		fatal_f("rexec version mismatch");
-	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 ||
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* confdata */
-	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
-	    (r = sshbuf_froms(m, &hostkeys)) != 0 ||
-	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||
-	    (r = sshbuf_get_stringb(m, ssh->kex->client_version)) != 0 ||
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* keystate */
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* pw_name */
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* authinfo */
-	    (r = sshbuf_get_string(m, NULL, NULL)) != 0 || /* auth_opts */
-	    (r = sshbuf_get_stringb(m, inc)) != 0)
-		fatal_fr(r, "parse config");
-
-	if (conf != NULL && (r = sshbuf_put(conf, cp, len)))
-		fatal_fr(r, "sshbuf_put");
-
-	while (sshbuf_len(inc) != 0) {
-		item = xcalloc(1, sizeof(*item));
-		if ((item->contents = sshbuf_new()) == NULL)
-			fatal_f("sshbuf_new failed");
-		if ((r = sshbuf_get_cstring(inc, &item->selector, NULL)) != 0 ||
-		    (r = sshbuf_get_cstring(inc, &item->filename, NULL)) != 0 ||
-		    (r = sshbuf_get_stringb(inc, item->contents)) != 0)
-			fatal_fr(r, "parse includes");
-		TAILQ_INSERT_TAIL(&includes, item, entry);
-	}
-
+	mm_get_state(ssh, &includes, conf, NULL, timing_secretp,
+	    &hostkeys, NULL, NULL, NULL, NULL);
 	parse_hostkeys(hostkeys);
-
-	free(cp);
-	sshbuf_free(m);
 	sshbuf_free(hostkeys);
-	sshbuf_free(inc);
 
 	debug3_f("done");
 }
@@ -675,8 +633,7 @@ main(int ac, char **av)
 	if ((cfg = sshbuf_new()) == NULL)
 		fatal("sshbuf_new config buf failed");
 	setproctitle("%s", "[unpriv-preauth-early]");
-	recv_privsep_state(ssh, PRIVSEP_CONFIG_PASS_FD, cfg, &timing_secret);
-	close(PRIVSEP_CONFIG_PASS_FD);
+	recv_privsep_state(ssh, cfg, &timing_secret);
 	parse_server_config(&options, "rexec", cfg, &includes, NULL, 1);
 	/* Fill in default values for those options not explicitly set. */
 	fill_default_server_options(&options);
