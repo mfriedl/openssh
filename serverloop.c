@@ -367,7 +367,7 @@ server_loop2(struct ssh *ssh)
 	channel_free_all(ssh);
 
 	/* free remaining sessions, e.g. remove wtmp entries */
-	session_destroy_all(ssh, NULL);
+	session_destroy_all(ssh);
 }
 
 static int

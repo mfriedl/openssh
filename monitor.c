@@ -123,6 +123,15 @@ int mm_answer_gss_userok(struct ssh *, int, struct sshbuf *);
 int mm_answer_gss_checkmic(struct ssh *, int, struct sshbuf *);
 #endif
 
+struct mon_pty {
+	TAILQ_ENTRY(mon_pty)	 mp_entry;
+	int			 mp_fd;
+	char			*mp_name;
+};
+TAILQ_HEAD(mon_ptys, mon_pty);
+static struct mon_ptys mon_ptys = TAILQ_HEAD_INITIALIZER(mon_ptys);
+static int num_ptys = 0;
+
 static Authctxt *authctxt;
 
 /* local state for key verify */
@@ -1268,8 +1277,10 @@ mm_answer_keyverify(struct ssh *ssh, int sock, struct sshbuf *m)
 }
 
 static void
-mm_record_login(struct ssh *ssh, Session *s, struct passwd *pw)
+mm_record_login(struct ssh *ssh, const char *ttyname, struct passwd *pw)
 {
+	extern struct monitor *pmonitor;
+	const char *remote;
 	socklen_t fromlen;
 	struct sockaddr_storage from;
 
@@ -1286,53 +1297,84 @@ mm_record_login(struct ssh *ssh, Session *s, struct passwd *pw)
 			cleanup_exit(255);
 		}
 	}
+
+	remote = "";
+	if (utmp_len > 0)
+		remote = auth_get_canonical_hostname(ssh, options.use_dns);
+	if (utmp_len == 0 || strlen(remote) > utmp_len)
+		remote = ssh_remote_ipaddr(ssh);
+
 	/* Record that there was a login on that tty from the remote host. */
-	record_login(s->pid, s->tty, pw->pw_name, pw->pw_uid,
-	    session_get_remote_name_or_ip(ssh, utmp_len, options.use_dns),
+	record_login(pmonitor->m_pid, ttyname, pw->pw_name, pw->pw_uid, remote,
 	    (struct sockaddr *)&from, fromlen);
 }
 
 static void
-mm_session_close(Session *s)
+mm_pty_remove_and_free(struct mon_pty *mp)
 {
-	debug3_f("session %d pid %ld", s->self, (long)s->pid);
-	if (s->ttyfd != -1) {
-		debug3_f("tty %s ptyfd %d", s->tty, s->ptyfd);
-		session_pty_cleanup2(s);
-	}
-	session_unused(s->self);
+	extern struct monitor *pmonitor;
+
+	record_logout(pmonitor->m_pid, mp->mp_name);
+
+	/* Release the pseudo-tty. */
+	if (getuid() == 0)
+		pty_release(mp->mp_name);
+
+	/*
+	 * Close the server side of the socket pairs.  We must do this after
+	 * the pty cleanup, so that another process doesn't get this pty
+	 * while we're still cleaning up.
+	 */
+	if (mp->mp_fd != -1 && close(mp->mp_fd) == -1)
+		error("close(mp->mp_fd/%d): %s", mp->mp_fd, strerror(errno));
+
+	TAILQ_REMOVE(&mon_ptys, mp, mp_entry);
+	free(mp->mp_name);
+	free(mp);
+	num_ptys--;
+}
+
+static void
+mm_pty_remove_all(void)
+{
+	struct mon_pty *mp;
+
+	while ((mp = TAILQ_FIRST(&mon_ptys)) != NULL)
+		mm_pty_remove_and_free(mp);
 }
 
 int
 mm_answer_pty(struct ssh *ssh, int sock, struct sshbuf *m)
 {
-	extern struct monitor *pmonitor;
-	Session *s;
-	int r, res, fd0;
+	struct mon_pty *mp;
+	char ttyname[64];
+	int r, fd0, ptyfd, ttyfd;
 
 	debug3_f("entering");
 
-	sshbuf_reset(m);
-	s = session_new();
-	if (s == NULL)
+	if (num_ptys >= options.max_sessions)
 		goto error;
-	s->authctxt = authctxt;
-	s->pw = authctxt->pw;
-	s->pid = pmonitor->m_pid;
-	res = pty_allocate(&s->ptyfd, &s->ttyfd, s->tty, sizeof(s->tty));
-	if (res == 0)
+	if (pty_allocate(&ptyfd, &ttyfd, ttyname, sizeof(ttyname)) == 0)
 		goto error;
-	pty_setowner(authctxt->pw, s->tty);
 
+	mp = xcalloc(1, sizeof(*mp));
+	mp->mp_fd = -1;
+	mp->mp_name = xstrdup(ttyname);
+	TAILQ_INSERT_TAIL(&mon_ptys, mp, mp_entry);
+	num_ptys++;
+
+	pty_setowner(authctxt->pw, ttyname);
+
+	sshbuf_reset(m);
 	if ((r = sshbuf_put_u32(m, 1)) != 0 ||
-	    (r = sshbuf_put_cstring(m, s->tty)) != 0)
+	    (r = sshbuf_put_cstring(m, ttyname)) != 0)
 		fatal_fr(r, "assemble");
 
 	/* We need to trick ttyslot */
-	if (dup2(s->ttyfd, 0) == -1)
+	if (dup2(ttyfd, 0) == -1)
 		fatal_f("dup2");
 
-	mm_record_login(ssh, s, authctxt->pw);
+	mm_record_login(ssh, ttyname, authctxt->pw);
 
 	/* Now we can close the file descriptor again */
 	close(0);
@@ -1344,8 +1386,8 @@ mm_answer_pty(struct ssh *ssh, int sock, struct sshbuf *m)
 
 	mm_request_send(sock, MONITOR_ANS_PTY, m);
 
-	if (mm_send_fd(sock, s->ptyfd) == -1 ||
-	    mm_send_fd(sock, s->ttyfd) == -1)
+	if (mm_send_fd(sock, ptyfd) == -1 ||
+	    mm_send_fd(sock, ttyfd) == -1)
 		fatal_f("send fds failed");
 
 	/* make sure nothing uses fd 0 */
@@ -1355,18 +1397,15 @@ mm_answer_pty(struct ssh *ssh, int sock, struct sshbuf *m)
 		error_f("fd0 %d != 0", fd0);
 
 	/* slave side of pty is not needed */
-	close(s->ttyfd);
-	s->ttyfd = s->ptyfd;
-	/* no need to dup() because nobody closes ptyfd */
-	s->ptymaster = s->ptyfd;
+	close(ttyfd);
 
-	debug3_f("tty %s ptyfd %d", s->tty, s->ttyfd);
+	mp->mp_fd = ptyfd;	/* entry complete */
+
+	debug3_f("tty %s ptyfd %d", mp->mp_name, mp->mp_fd);
 
 	return (0);
 
  error:
-	if (s != NULL)
-		mm_session_close(s);
 	if ((r = sshbuf_put_u32(m, 0)) != 0)
 		fatal_fr(r, "assemble 0");
 	mm_request_send(sock, MONITOR_ANS_PTY, m);
@@ -1376,7 +1415,7 @@ mm_answer_pty(struct ssh *ssh, int sock, struct sshbuf *m)
 int
 mm_answer_pty_cleanup(struct ssh *ssh, int sock, struct sshbuf *m)
 {
-	Session *s;
+	struct mon_pty *mp;
 	char *tty;
 	int r;
 
@@ -1384,8 +1423,14 @@ mm_answer_pty_cleanup(struct ssh *ssh, int sock, struct sshbuf *m)
 
 	if ((r = sshbuf_get_cstring(m, &tty, NULL)) != 0)
 		fatal_fr(r, "parse tty");
-	if ((s = session_by_tty(tty)) != NULL)
-		mm_session_close(s);
+
+	TAILQ_FOREACH(mp, &mon_ptys, mp_entry) {
+		if (strcmp(mp->mp_name, tty) == 0) {
+			mm_pty_remove_and_free(mp);
+			break;
+		}
+	}
+
 	sshbuf_reset(m);
 	free(tty);
 	return (0);
@@ -1400,7 +1445,8 @@ mm_answer_term(struct ssh *ssh, int sock, struct sshbuf *req)
 	debug3_f("tearing down sessions");
 
 	/* The child is terminating */
-	session_destroy_all(ssh, &mm_session_close);
+
+	mm_pty_remove_all();
 
 	while (waitpid(pmonitor->m_pid, &status, 0) == -1)
 		if (errno != EINTR)
@@ -1627,3 +1673,34 @@ mm_answer_gss_userok(struct ssh *ssh, int sock, struct sshbuf *m)
 }
 #endif /* GSSAPI */
 
+void
+do_cleanup(struct ssh *ssh, Authctxt *authctxt_arg)
+{
+	static int called = 0;
+
+	debug("do_cleanup");
+
+	/* avoid double cleanup */
+	if (called)
+		return;
+	called = 1;
+
+	if (authctxt_arg == NULL || !authctxt_arg->authenticated)
+		return;
+#ifdef KRB5
+	if (options.kerberos_ticket_cleanup &&
+	    authctxt_arg->krb5_ctx)
+		krb5_cleanup_proc(authctxt_arg);
+#endif
+
+#ifdef GSSAPI
+	if (options.gss_cleanup_creds)
+		ssh_gssapi_cleanup_creds();
+#endif
+
+	/*
+	 * Cleanup ptys/utmp only if privsep is disabled,
+	 * or if running in monitor.
+	 */
+	mm_pty_remove_all();
+}

@@ -69,6 +69,9 @@ extern ServerOptions options;
 extern struct include_list includes;
 extern struct sshauthopt *auth_opts;
 
+/* XXX used by session.c */
+login_cap_t *lc;
+
 /* Debugging messages */
 static struct sshbuf *auth_debug;
 
@@ -413,7 +416,6 @@ check_key_in_hostfiles(struct passwd *pw, struct sshkey *key, const char *host,
 struct passwd *
 getpwnamallow(struct ssh *ssh, const char *user)
 {
-	extern login_cap_t *lc;
 	auth_session_t *as;
 	struct passwd *pw;
 	struct connection_info *ci;
