@@ -746,8 +746,6 @@ main(int ac, char **av)
 	/* Try to send all our hostkeys to the client */
 	notify_hostkeys(ssh);
 
-//kill(getpid(), SIGSTOP);
-
 	/* Start session. */
 	do_authenticated(ssh, authctxt);
 
