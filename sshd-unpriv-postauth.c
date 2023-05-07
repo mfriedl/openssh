@@ -565,6 +565,9 @@ main(int ac, char **av)
 	    options.log_facility == SYSLOG_FACILITY_NOT_SET ?
 	    SYSLOG_FACILITY_AUTH : options.log_facility, 1);
 
+	if (!rexeced_flag)
+		fatal("sshd-unpriv-postauth should not be executed directly");
+
 	/* XXX can't use monitor_init(); it makes fds */
 	pmonitor = xcalloc(1, sizeof(*pmonitor));
 	pmonitor->m_sendfd = pmonitor->m_log_recvfd = -1;
@@ -579,9 +582,6 @@ main(int ac, char **av)
 	}
 
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
-
-	if (!rexeced_flag)
-		fatal("sshd-unpriv-postauth should not be executed directly");
 
 	/* Connection passed by stdin/out */
 	if (inetd_flag) {
