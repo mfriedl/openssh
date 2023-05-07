@@ -92,7 +92,6 @@
 #include "version.h"
 #include "ssherr.h"
 #include "sk-api.h"
-#include "srclimit.h"
 #include "dh.h"
 
 /* Privsep fds */
