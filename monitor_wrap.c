@@ -649,7 +649,8 @@ mm_get_state(struct ssh *ssh, struct include_list *includes,
 
 	debug3_f("entering");
 
-	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL)
+	if ((m = sshbuf_new()) == NULL || (inc = sshbuf_new()) == NULL ||
+	    (*hostkeysp = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 
 	mm_request_send(pmonitor->m_recvfd, MONITOR_REQ_STATE, m);
@@ -660,7 +661,7 @@ mm_get_state(struct ssh *ssh, struct include_list *includes,
 
 	if ((r = sshbuf_get_string(m, &cp, &len)) != 0 ||
 	    (r = sshbuf_get_u64(m, timing_secretp)) != 0 ||
-	    (r = sshbuf_froms(m, hostkeysp)) != 0 ||
+	    (r = sshbuf_get_stringb(m, *hostkeysp)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->server_version)) != 0 ||
 	    (r = sshbuf_get_stringb(m, ssh->kex->client_version)) != 0 ||
 	    (r = sshbuf_get_stringb(m, inc)) != 0)
@@ -668,11 +669,16 @@ mm_get_state(struct ssh *ssh, struct include_list *includes,
 
 	/* postauth */
 	if (confdatap) {
-		if ((r = sshbuf_froms(m, confdatap)) != 0 ||
-		    (r = sshbuf_froms(m, keystatep)) != 0 ||
+		if ((*confdatap = sshbuf_new()) == NULL ||
+		    (*keystatep = sshbuf_new()) == NULL ||
+		    (*authinfop = sshbuf_new()) == NULL ||
+		    (*auth_optsp = sshbuf_new()) == NULL)
+			fatal_f("sshbuf_new failed");
+		if ((r = sshbuf_get_stringb(m, *confdatap)) != 0 ||
+		    (r = sshbuf_get_stringb(m, *keystatep)) != 0 ||
 		    (r = sshbuf_get_string(m, pw_namep, NULL)) != 0 ||
-		    (r = sshbuf_froms(m, authinfop)) != 0 ||
-		    (r = sshbuf_froms(m, auth_optsp)) != 0)
+		    (r = sshbuf_get_stringb(m, *authinfop)) != 0 ||
+		    (r = sshbuf_get_stringb(m, *auth_optsp)) != 0)
 			fatal_fr(r, "parse config postauth");
 	}
 
