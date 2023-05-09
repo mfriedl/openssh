@@ -8,9 +8,9 @@ SRCS=	sshd-unpriv-postauth.c auth2-methods.c \
 	session.c groupaccess.c monitor_wrap.c \
 	sftp-server.c sftp-common.c sftp-realpath.c
 SRCS+=	authfd.c compat.c dns.c fatal.c hostfile.c readpass.c utf8.c uidswap.c
-SRCS+=	${SRCS_BASE} ${SRCS_KEX} ${SRCS_KEXS} ${SRCS_KEY} ${SRCS_KEYP} \
-	${SRCS_KRL} ${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \
-	${SRCS_SK_CLIENT}
+SRCS+=	atomicio.c
+SRCS+=	${SRCS_BASE} ${SRCS_KEX} ${SRCS_KEXS} ${SRCS_KEY} \
+	${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_SK_CLIENT}
 
 PROG=	sshd-unpriv-postauth
 BINDIR=	/usr/libexec
