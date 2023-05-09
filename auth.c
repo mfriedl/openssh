@@ -72,9 +72,6 @@ extern struct sshauthopt *auth_opts;
 /* XXX used by session.c */
 login_cap_t *lc;
 
-/* Debugging messages */
-static struct sshbuf *auth_debug;
-
 /*
  * Check if the user is allowed to log in via ssh. If user is listed
  * in DenyUsers or one of user's groups is listed in DenyGroups, false
@@ -196,92 +193,6 @@ allowed_user(struct ssh *ssh, struct passwd * pw)
 	}
 	/* We found no reason not to let this user try to log on... */
 	return 1;
-}
-
-/*
- * Formats any key left in authctxt->auth_method_key for inclusion in
- * auth_log()'s message. Also includes authxtct->auth_method_info if present.
- */
-static char *
-format_method_key(Authctxt *authctxt)
-{
-	const struct sshkey *key = authctxt->auth_method_key;
-	const char *methinfo = authctxt->auth_method_info;
-	char *fp, *cafp, *ret = NULL;
-
-	if (key == NULL)
-		return NULL;
-
-	if (sshkey_is_cert(key)) {
-		fp = sshkey_fingerprint(key,
-		    options.fingerprint_hash, SSH_FP_DEFAULT);
-		cafp = sshkey_fingerprint(key->cert->signature_key,
-		    options.fingerprint_hash, SSH_FP_DEFAULT);
-		xasprintf(&ret, "%s %s ID %s (serial %llu) CA %s %s%s%s",
-		    sshkey_type(key), fp == NULL ? "(null)" : fp,
-		    key->cert->key_id,
-		    (unsigned long long)key->cert->serial,
-		    sshkey_type(key->cert->signature_key),
-		    cafp == NULL ? "(null)" : cafp,
-		    methinfo == NULL ? "" : ", ",
-		    methinfo == NULL ? "" : methinfo);
-		free(fp);
-		free(cafp);
-	} else {
-		fp = sshkey_fingerprint(key, options.fingerprint_hash,
-		    SSH_FP_DEFAULT);
-		xasprintf(&ret, "%s %s%s%s", sshkey_type(key),
-		    fp == NULL ? "(null)" : fp,
-		    methinfo == NULL ? "" : ", ",
-		    methinfo == NULL ? "" : methinfo);
-		free(fp);
-	}
-	return ret;
-}
-
-void
-auth_log(struct ssh *ssh, int authenticated, int partial,
-    const char *method, const char *submethod)
-{
-	Authctxt *authctxt = (Authctxt *)ssh->authctxt;
-	int level = SYSLOG_LEVEL_VERBOSE;
-	const char *authmsg;
-	char *extra = NULL;
-
-	if (!mm_is_monitor() && !authctxt->postponed)
-		return;
-
-	/* Raise logging level */
-	if (authenticated == 1 ||
-	    !authctxt->valid ||
-	    authctxt->failures >= options.max_authtries / 2 ||
-	    strcmp(method, "password") == 0)
-		level = SYSLOG_LEVEL_INFO;
-
-	if (authctxt->postponed)
-		authmsg = "Postponed";
-	else if (partial)
-		authmsg = "Partial";
-	else
-		authmsg = authenticated ? "Accepted" : "Failed";
-
-	if ((extra = format_method_key(authctxt)) == NULL) {
-		if (authctxt->auth_method_info != NULL)
-			extra = xstrdup(authctxt->auth_method_info);
-	}
-
-	do_log2(level, "%s %s%s%s for %s%.100s from %.200s port %d ssh2%s%s",
-	    authmsg,
-	    method,
-	    submethod != NULL ? "/" : "", submethod == NULL ? "" : submethod,
-	    authctxt->valid ? "" : "invalid user ",
-	    authctxt->user,
-	    ssh_remote_ipaddr(ssh),
-	    ssh_remote_port(ssh),
-	    extra != NULL ? ": " : "",
-	    extra != NULL ? extra : "");
-
-	free(extra);
 }
 
 void
@@ -493,47 +404,6 @@ auth_key_is_revoked(struct sshkey *key)
 	return r == 0 ? 0 : 1;
 }
 
-void
-auth_debug_add(const char *fmt,...)
-{
-	char buf[1024];
-	va_list args;
-	int r;
-
-	va_start(args, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, args);
-	va_end(args);
-	debug3("%s", buf);
-	if (auth_debug != NULL)
-		if ((r = sshbuf_put_cstring(auth_debug, buf)) != 0)
-			fatal_fr(r, "sshbuf_put_cstring");
-}
-
-void
-auth_debug_send(struct ssh *ssh)
-{
-	char *msg;
-	int r;
-
-	if (auth_debug == NULL)
-		return;
-	while (sshbuf_len(auth_debug) != 0) {
-		if ((r = sshbuf_get_cstring(auth_debug, &msg, NULL)) != 0)
-			fatal_fr(r, "sshbuf_get_cstring");
-		ssh_packet_send_debug(ssh, "%s", msg);
-		free(msg);
-	}
-}
-
-void
-auth_debug_reset(void)
-{
-	if (auth_debug != NULL)
-		sshbuf_reset(auth_debug);
-	else if ((auth_debug = sshbuf_new()) == NULL)
-		fatal_f("sshbuf_new failed");
-}
-
 struct passwd *
 fakepw(void)
 {
@@ -583,76 +453,6 @@ auth_get_canonical_hostname(struct ssh *ssh, int use_dns)
 }
 
 /* These functions link key/cert options to the auth framework */
-
-/* Log sshauthopt options locally and (optionally) for remote transmission */
-void
-auth_log_authopts(const char *loc, const struct sshauthopt *opts, int do_remote)
-{
-	int do_env = options.permit_user_env && opts->nenv > 0;
-	int do_permitopen = opts->npermitopen > 0 &&
-	    (options.allow_tcp_forwarding & FORWARD_LOCAL) != 0;
-	int do_permitlisten = opts->npermitlisten > 0 &&
-	    (options.allow_tcp_forwarding & FORWARD_REMOTE) != 0;
-	size_t i;
-	char msg[1024], buf[64];
-
-	snprintf(buf, sizeof(buf), "%d", opts->force_tun_device);
-	/* Try to keep this alphabetically sorted */
-	snprintf(msg, sizeof(msg), "key options:%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
-	    opts->permit_agent_forwarding_flag ? " agent-forwarding" : "",
-	    opts->force_command == NULL ? "" : " command",
-	    do_env ?  " environment" : "",
-	    opts->valid_before == 0 ? "" : "expires",
-	    opts->no_require_user_presence ? " no-touch-required" : "",
-	    do_permitopen ?  " permitopen" : "",
-	    do_permitlisten ?  " permitlisten" : "",
-	    opts->permit_port_forwarding_flag ? " port-forwarding" : "",
-	    opts->cert_principals == NULL ? "" : " principals",
-	    opts->permit_pty_flag ? " pty" : "",
-	    opts->require_verify ? " uv" : "",
-	    opts->force_tun_device == -1 ? "" : " tun=",
-	    opts->force_tun_device == -1 ? "" : buf,
-	    opts->permit_user_rc ? " user-rc" : "",
-	    opts->permit_x11_forwarding_flag ? " x11-forwarding" : "");
-
-	debug("%s: %s", loc, msg);
-	if (do_remote)
-		auth_debug_add("%s: %s", loc, msg);
-
-	if (options.permit_user_env) {
-		for (i = 0; i < opts->nenv; i++) {
-			debug("%s: environment: %s", loc, opts->env[i]);
-			if (do_remote) {
-				auth_debug_add("%s: environment: %s",
-				    loc, opts->env[i]);
-			}
-		}
-	}
-
-	/* Go into a little more details for the local logs. */
-	if (opts->valid_before != 0) {
-		format_absolute_time(opts->valid_before, buf, sizeof(buf));
-		debug("%s: expires at %s", loc, buf);
-	}
-	if (opts->cert_principals != NULL) {
-		debug("%s: authorized principals: \"%s\"",
-		    loc, opts->cert_principals);
-	}
-	if (opts->force_command != NULL)
-		debug("%s: forced command: \"%s\"", loc, opts->force_command);
-	if (do_permitopen) {
-		for (i = 0; i < opts->npermitopen; i++) {
-			debug("%s: permitted open: %s",
-			    loc, opts->permitopen[i]);
-		}
-	}
-	if (do_permitlisten) {
-		for (i = 0; i < opts->npermitlisten; i++) {
-			debug("%s: permitted listen: %s",
-			    loc, opts->permitlisten[i]);
-		}
-	}
-}
 
 /* Activate a new set of key/cert options; merging with what is there. */
 int

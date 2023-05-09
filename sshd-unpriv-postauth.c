@@ -151,6 +151,9 @@ struct include_list includes = TAILQ_HEAD_INITIALIZER(includes);
 /* message to be displayed after login */
 struct sshbuf *loginmsg;
 
+/* was a side effect of getpwnamallow in monitor */
+login_cap_t *lc;			/* XXX */
+
 /* Prototypes for various functions defined later in this file. */
 static void setup_ssh2_kex(struct ssh *);
 
@@ -384,8 +387,6 @@ recv_privsep_state(struct ssh *ssh, struct sshbuf *conf,
 	authctxt->valid = 1;
 	authctxt->session_info = authinfo;
 
-	/* was a side effect of getpwnamallow in monitor */
-	extern login_cap_t *lc;			/* XXX */
 	lc = login_getclass(pw->pw_class);	/* XXX */
 
 	sshbuf_free(hostkeys);
