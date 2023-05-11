@@ -194,21 +194,6 @@ allowed_user(struct ssh *ssh, struct passwd * pw)
 	return 1;
 }
 
-void
-auth_maxtries_exceeded(struct ssh *ssh)
-{
-	Authctxt *authctxt = (Authctxt *)ssh->authctxt;
-
-	error("maximum authentication attempts exceeded for "
-	    "%s%.100s from %.200s port %d ssh2",
-	    authctxt->valid ? "" : "invalid user ",
-	    authctxt->user,
-	    ssh_remote_ipaddr(ssh),
-	    ssh_remote_port(ssh));
-	ssh_packet_disconnect(ssh, "Too many authentication failures");
-	/* NOTREACHED */
-}
-
 /*
  * Check whether root logins are disallowed.
  */

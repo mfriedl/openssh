@@ -163,6 +163,21 @@ ensure_minimum_time_since(double start, double seconds)
 	nanosleep(&ts, NULL);
 }
 
+static void
+auth_maxtries_exceeded(struct ssh *ssh)
+{
+	Authctxt *authctxt = (Authctxt *)ssh->authctxt;
+
+	error("maximum authentication attempts exceeded for "
+	    "%s%.100s from %.200s port %d ssh2",
+	    authctxt->valid ? "" : "invalid user ",
+	    authctxt->user,
+	    ssh_remote_ipaddr(ssh),
+	    ssh_remote_port(ssh));
+	ssh_packet_disconnect(ssh, "Too many authentication failures");
+	/* NOTREACHED */
+}
+
 static int
 input_userauth_request(int type, u_int32_t seq, struct ssh *ssh)
 {

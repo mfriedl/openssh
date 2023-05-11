@@ -160,7 +160,6 @@ void	krb5_cleanup_proc(Authctxt *authctxt);
 void	do_authentication2(struct ssh *);
 
 void	auth_log(struct ssh *, int, int, const char *, const char *);
-void	auth_maxtries_exceeded(struct ssh *) __attribute__((noreturn));
 void	userauth_finish(struct ssh *, int, const char *, const char *);
 int	auth_root_allowed(struct ssh *, const char *);
 
