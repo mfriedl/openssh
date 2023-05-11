@@ -66,7 +66,6 @@
 /* import */
 extern ServerOptions options;
 extern struct include_list includes;
-extern struct sshauthopt *auth_opts;
 
 /* XXX used by session.c */
 login_cap_t *lc;
@@ -320,40 +319,4 @@ auth_get_canonical_hostname(struct ssh *ssh, int use_dns)
 		return dnsname;
 	dnsname = ssh_remote_hostname(ssh);
 	return dnsname;
-}
-
-/* These functions link key/cert options to the auth framework */
-
-/* Activate a new set of key/cert options; merging with what is there. */
-int
-auth_activate_options(struct ssh *ssh, struct sshauthopt *opts)
-{
-	struct sshauthopt *old = auth_opts;
-	const char *emsg = NULL;
-
-	debug_f("setting new authentication options");
-	if ((auth_opts = sshauthopt_merge(old, opts, &emsg)) == NULL) {
-		error("Inconsistent authentication options: %s", emsg);
-		return -1;
-	}
-	return 0;
-}
-
-/* Disable forwarding, etc for the session */
-void
-auth_restrict_session(struct ssh *ssh)
-{
-	struct sshauthopt *restricted;
-
-	debug_f("restricting session");
-
-	/* A blank sshauthopt defaults to permitting nothing */
-	if ((restricted = sshauthopt_new()) == NULL)
-		fatal_f("sshauthopt_new failed");
-	restricted->permit_pty_flag = 1;
-	restricted->restricted = 1;
-
-	if (auth_activate_options(ssh, restricted) != 0)
-		fatal_f("failed to restrict session");
-	sshauthopt_free(restricted);
 }
