@@ -58,6 +58,7 @@
 /* import */
 extern ServerOptions options;
 extern struct authmethod_cfg methodcfg_passwd;
+extern struct authmethod_cfg methodcfg_none;
 extern struct sshbuf *loginmsg;
 
 int sys_auth_passwd(struct ssh *, const char *);
@@ -157,5 +158,10 @@ sys_auth_passwd(struct ssh *ssh, const char *password)
 
 Authmethod method_passwd = {
 	&methodcfg_passwd,
+	NULL,
+};
+
+Authmethod method_none = {
+	&methodcfg_none,
 	NULL,
 };
