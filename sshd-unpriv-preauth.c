@@ -729,9 +729,6 @@ main(int ac, char **av)
 		fatal("sshbuf_new loginmsg failed");
 	auth_debug_reset();
 
-	/* Enable challenge-response authentication for privilege separation */
-	privsep_challenge_enable();
-
 #ifdef GSSAPI
 	/* Cache supported mechanism OIDs for later use */
 	ssh_gssapi_prepare_supported_oids();

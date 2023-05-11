@@ -170,8 +170,6 @@ int	 auth2_update_methods_lists(Authctxt *, const char *, const char *);
 int	 auth2_setup_methods_lists(Authctxt *);
 int	 auth2_method_allowed(Authctxt *, const char *, const char *);
 
-void	privsep_challenge_enable(void);
-
 int	auth2_challenge(struct ssh *, char *);
 void	auth2_challenge_stop(struct ssh *);
 int	bsdauth_query(void *, char **, char **, u_int *, char ***, u_int **);

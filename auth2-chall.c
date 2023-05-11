@@ -319,10 +319,3 @@ input_userauth_info_response(int type, u_int32_t seq, struct ssh *ssh)
 	    devicename);
 	return 0;
 }
-
-void
-privsep_challenge_enable(void)
-{
-	extern KbdintDevice mm_bsdauth_device;
-	devices[0] = &mm_bsdauth_device;
-}

@@ -4,8 +4,9 @@
 
 SRCS=	sshd-monitor.c auth2-methods.c \
 	auth-rhosts.c auth-passwd.c sshpty.c sshlogin.c servconf.c \
-	auth.c auth2.c auth2-banner.c auth-log.c auth-options.c auth2-chall.c \
-	groupaccess.c auth-bsdauth.c auth2-hostbased-monitor.c auth2-kbdint.c \
+	auth.c auth2.c auth2-banner.c auth-log.c auth-options.c \
+	groupaccess.c auth-bsdauth-monitor.c auth2-kbdint-monitor.c \
+	auth2-hostbased-monitor.c \
 	auth2-pubkey-monitor.c auth2-pubkeyfile.c \
 	monitor.c monitor_wrap.c \
 	dh.c

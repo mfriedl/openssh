@@ -1,6 +1,6 @@
-/* $OpenBSD: auth-bsdauth.c,v 1.15 2018/07/09 21:35:50 markus Exp $ */
+/* $OpenBSD: auth2-kbdint.c,v 1.14 2021/12/19 22:12:07 djm Exp $ */
 /*
- * Copyright (c) 2001 Markus Friedl.  All rights reserved.
+ * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,41 +24,24 @@
  */
 
 #include <sys/types.h>
-#include <stdarg.h>
+
+#include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 #include "xmalloc.h"
-#include "sshkey.h"
-#include "sshbuf.h"
+#include "packet.h"
 #include "hostfile.h"
 #include "auth.h"
 #include "log.h"
-#ifdef GSSAPI
-#include "ssh-gss.h"
-#endif
-#include "monitor_wrap.h"
+#include "misc.h"
+#include "servconf.h"
+#include "ssherr.h"
 
-static void *
-bsdauth_init_ctx(Authctxt *authctxt)
-{
-	return authctxt;
-}
+/* import */
+extern struct authmethod_cfg methodcfg_kbdint;
 
-static void
-bsdauth_free_ctx(void *ctx)
-{
-	Authctxt *authctxt = ctx;
-
-	if (authctxt && authctxt->as) {
-		auth_close(authctxt->as);
-		authctxt->as = NULL;
-	}
-}
-
-KbdintDevice bsdauth_device = {
-	"bsdauth",
-	bsdauth_init_ctx,
-	mm_bsdauth_query,
-	mm_bsdauth_respond,
-	bsdauth_free_ctx
+Authmethod method_kbdint = {
+	&methodcfg_kbdint,
+	NULL,
 };
