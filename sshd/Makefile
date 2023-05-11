@@ -18,7 +18,7 @@ KERBEROS5=no
 
 .if (${KERBEROS5:L} == "yes")
 CFLAGS+=-DKRB5 -I${DESTDIR}/usr/include/kerberosV -DGSSAPI
-SRCS+=  auth-krb5.c auth2-gss.c gss-serv.c gss-serv-krb5.c
+SRCS+=  auth2-gss.c gss-serv.c gss-serv-krb5.c
 .endif
 
 .include <bsd.prog.mk>

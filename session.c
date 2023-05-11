@@ -2246,11 +2246,6 @@ do_cleanup(struct ssh *ssh, Authctxt *authctxt)
 
 	if (authctxt == NULL || !authctxt->authenticated)
 		return;
-#ifdef KRB5
-	if (options.kerberos_ticket_cleanup &&
-	    authctxt->krb5_ctx)
-		krb5_cleanup_proc(authctxt);
-#endif
 
 #ifdef GSSAPI
 	if (options.gss_cleanup_creds)
