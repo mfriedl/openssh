@@ -54,7 +54,6 @@
 #include "auth.h"
 #include "auth-options.h"
 #include "canohost.h"
-#include "uidswap.h"
 #include "packet.h"
 #ifdef GSSAPI
 #include "ssh-gss.h"
@@ -235,53 +234,6 @@ auth_root_allowed(struct ssh *ssh, const char *method)
 	logit("ROOT LOGIN REFUSED FROM %.200s port %d",
 	    ssh_remote_ipaddr(ssh), ssh_remote_port(ssh));
 	return 0;
-}
-
-
-/* return ok if key exists in sysfile or userfile */
-HostStatus
-check_key_in_hostfiles(struct passwd *pw, struct sshkey *key, const char *host,
-    const char *sysfile, const char *userfile)
-{
-	char *user_hostfile;
-	struct stat st;
-	HostStatus host_status;
-	struct hostkeys *hostkeys;
-	const struct hostkey_entry *found;
-
-	hostkeys = init_hostkeys();
-	load_hostkeys(hostkeys, host, sysfile, 0);
-	if (userfile != NULL) {
-		user_hostfile = tilde_expand_filename(userfile, pw->pw_uid);
-		if (options.strict_modes &&
-		    (stat(user_hostfile, &st) == 0) &&
-		    ((st.st_uid != 0 && st.st_uid != pw->pw_uid) ||
-		    (st.st_mode & 022) != 0)) {
-			logit("Authentication refused for %.100s: "
-			    "bad owner or modes for %.200s",
-			    pw->pw_name, user_hostfile);
-			auth_debug_add("Ignored %.200s: bad ownership or modes",
-			    user_hostfile);
-		} else {
-			temporarily_use_uid(pw);
-			load_hostkeys(hostkeys, host, user_hostfile, 0);
-			restore_uid();
-		}
-		free(user_hostfile);
-	}
-	host_status = check_key_in_hostkeys(hostkeys, key, &found);
-	if (host_status == HOST_REVOKED)
-		error("WARNING: revoked key for %s attempted authentication",
-		    host);
-	else if (host_status == HOST_OK)
-		debug_f("key for %s found at %s:%ld",
-		    found->host, found->file, found->line);
-	else
-		debug_f("key for host %s not found", host);
-
-	free_hostkeys(hostkeys);
-
-	return host_status;
 }
 
 struct passwd *

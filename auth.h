@@ -182,10 +182,6 @@ int	 auth_key_is_revoked(struct sshkey *);
 
 const char	*auth_get_canonical_hostname(struct ssh *, int);
 
-HostStatus
-check_key_in_hostfiles(struct passwd *, struct sshkey *, const char *,
-    const char *, const char *);
-
 /* hostkey handling */
 struct sshkey	*get_hostkey_by_index(int);
 struct sshkey	*get_hostkey_public_by_index(int, struct ssh *);

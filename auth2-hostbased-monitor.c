@@ -23,8 +23,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include <stdlib.h>
 #include <pwd.h>
@@ -42,6 +42,7 @@
 #include "sshkey.h"
 #include "hostfile.h"
 #include "auth.h"
+#include "uidswap.h"
 #include "canohost.h"
 #ifdef GSSAPI
 #include "ssh-gss.h"
@@ -53,6 +54,52 @@
 /* import */
 extern ServerOptions options;
 extern struct authmethod_cfg methodcfg_hostbased;
+
+/* return ok if key exists in sysfile or userfile */
+static HostStatus
+check_key_in_hostfiles(struct passwd *pw, struct sshkey *key, const char *host,
+    const char *sysfile, const char *userfile)
+{
+	char *user_hostfile;
+	struct stat st;
+	HostStatus host_status;
+	struct hostkeys *hostkeys;
+	const struct hostkey_entry *found;
+
+	hostkeys = init_hostkeys();
+	load_hostkeys(hostkeys, host, sysfile, 0);
+	if (userfile != NULL) {
+		user_hostfile = tilde_expand_filename(userfile, pw->pw_uid);
+		if (options.strict_modes &&
+		    (stat(user_hostfile, &st) == 0) &&
+		    ((st.st_uid != 0 && st.st_uid != pw->pw_uid) ||
+		    (st.st_mode & 022) != 0)) {
+			logit("Authentication refused for %.100s: "
+			    "bad owner or modes for %.200s",
+			    pw->pw_name, user_hostfile);
+			auth_debug_add("Ignored %.200s: bad ownership or modes",
+			    user_hostfile);
+		} else {
+			temporarily_use_uid(pw);
+			load_hostkeys(hostkeys, host, user_hostfile, 0);
+			restore_uid();
+		}
+		free(user_hostfile);
+	}
+	host_status = check_key_in_hostkeys(hostkeys, key, &found);
+	if (host_status == HOST_REVOKED)
+		error("WARNING: revoked key for %s attempted authentication",
+		    host);
+	else if (host_status == HOST_OK)
+		debug_f("key for %s found at %s:%ld",
+		    found->host, found->file, found->line);
+	else
+		debug_f("key for host %s not found", host);
+
+	free_hostkeys(hostkeys);
+
+	return host_status;
+}
 
 /* return 1 if given hostkey is allowed */
 int
