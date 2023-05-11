@@ -238,46 +238,6 @@ auth_root_allowed(struct ssh *ssh, const char *method)
 }
 
 
-/*
- * Given a template and a passwd structure, build a filename
- * by substituting % tokenised options. Currently, %% becomes '%',
- * %h becomes the home directory and %u the username.
- *
- * This returns a buffer allocated by xmalloc.
- */
-char *
-expand_authorized_keys(const char *filename, struct passwd *pw)
-{
-	char *file, uidstr[32], ret[PATH_MAX];
-	int i;
-
-	snprintf(uidstr, sizeof(uidstr), "%llu",
-	    (unsigned long long)pw->pw_uid);
-	file = percent_expand(filename, "h", pw->pw_dir,
-	    "u", pw->pw_name, "U", uidstr, (char *)NULL);
-
-	/*
-	 * Ensure that filename starts anchored. If not, be backward
-	 * compatible and prepend the '%h/'
-	 */
-	if (path_absolute(file))
-		return (file);
-
-	i = snprintf(ret, sizeof(ret), "%s/%s", pw->pw_dir, file);
-	if (i < 0 || (size_t)i >= sizeof(ret))
-		fatal("expand_authorized_keys: path too long");
-	free(file);
-	return (xstrdup(ret));
-}
-
-char *
-authorized_principals_file(struct passwd *pw)
-{
-	if (options.authorized_principals_file == NULL)
-		return NULL;
-	return expand_authorized_keys(options.authorized_principals_file, pw);
-}
-
 /* return ok if key exists in sysfile or userfile */
 HostStatus
 check_key_in_hostfiles(struct passwd *pw, struct sshkey *key, const char *host,

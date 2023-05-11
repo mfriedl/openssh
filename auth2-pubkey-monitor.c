@@ -231,6 +231,46 @@ match_principals_command(struct passwd *user_pw,
 	return found_principal;
 }
 
+/*
+ * Given a template and a passwd structure, build a filename
+ * by substituting % tokenised options. Currently, %% becomes '%',
+ * %h becomes the home directory and %u the username.
+ *
+ * This returns a buffer allocated by xmalloc.
+ */
+static char *
+expand_authorized_keys(const char *filename, struct passwd *pw)
+{
+	char *file, uidstr[32], ret[PATH_MAX];
+	int i;
+
+	snprintf(uidstr, sizeof(uidstr), "%llu",
+	    (unsigned long long)pw->pw_uid);
+	file = percent_expand(filename, "h", pw->pw_dir,
+	    "u", pw->pw_name, "U", uidstr, (char *)NULL);
+
+	/*
+	 * Ensure that filename starts anchored. If not, be backward
+	 * compatible and prepend the '%h/'
+	 */
+	if (path_absolute(file))
+		return (file);
+
+	i = snprintf(ret, sizeof(ret), "%s/%s", pw->pw_dir, file);
+	if (i < 0 || (size_t)i >= sizeof(ret))
+		fatal("expand_authorized_keys: path too long");
+	free(file);
+	return (xstrdup(ret));
+}
+
+static char *
+authorized_principals_file(struct passwd *pw)
+{
+	if (options.authorized_principals_file == NULL)
+		return NULL;
+	return expand_authorized_keys(options.authorized_principals_file, pw);
+}
+
 /* Authenticate a certificate key against TrustedUserCAKeys */
 static int
 user_cert_trusted_ca(struct passwd *pw, struct sshkey *key,

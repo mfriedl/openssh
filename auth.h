@@ -178,9 +178,6 @@ int	bsdauth_respond(void *, u_int, char **);
 int	allowed_user(struct ssh *, struct passwd *);
 struct passwd * getpwnamallow(struct ssh *, const char *user);
 
-char	*expand_authorized_keys(const char *, struct passwd *pw);
-char	*authorized_principals_file(struct passwd *);
-
 int	 auth_key_is_revoked(struct sshkey *);
 
 const char	*auth_get_canonical_hostname(struct ssh *, int);
