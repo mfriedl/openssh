@@ -495,3 +495,32 @@ auth_root_allowed(struct ssh *ssh, const char *method)
 	    ssh_remote_ipaddr(ssh), ssh_remote_port(ssh));
 	return 0;
 }
+
+struct passwd *
+fakepw(void)
+{
+	static int done = 0;
+	static struct passwd fake;
+	const char hashchars[] = "./ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	    "abcdefghijklmnopqrstuvwxyz0123456789"; /* from bcrypt.c */
+	char *cp;
+
+	if (done)
+		return (&fake);
+
+	memset(&fake, 0, sizeof(fake));
+	fake.pw_name = "NOUSER";
+	fake.pw_passwd = xstrdup("$2a$10$"
+	    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+	for (cp = fake.pw_passwd + 7; *cp != '\0'; cp++)
+		*cp = hashchars[arc4random_uniform(sizeof(hashchars) - 1)];
+	fake.pw_gecos = "NOUSER";
+	fake.pw_uid = (uid_t)-1;
+	fake.pw_gid = (gid_t)-1;
+	fake.pw_class = "";
+	fake.pw_dir = "/nonexist";
+	fake.pw_shell = "/nonexist";
+	done = 1;
+
+	return (&fake);
+}
