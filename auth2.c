@@ -47,6 +47,7 @@
 #include "sshkey.h"
 #include "hostfile.h"
 #include "auth.h"
+#include "auth-options.h"
 #include "dispatch.h"
 #include "pathnames.h"
 #ifdef GSSAPI
@@ -58,6 +59,7 @@
 
 /* import */
 extern ServerOptions options;
+extern struct sshauthopt *auth_opts;
 
 /* methods */
 
@@ -429,4 +431,31 @@ auth2_update_session_info(Authctxt *authctxt, const char *method,
 	}
 	if ((r = sshbuf_put_u8(authctxt->session_info, '\n')) != 0)
 		fatal_fr(r, "append");
+}
+
+/*
+ * Check whether root logins are disallowed.
+ */
+int
+auth_root_allowed(struct ssh *ssh, const char *method)
+{
+	switch (options.permit_root_login) {
+	case PERMIT_YES:
+		return 1;
+	case PERMIT_NO_PASSWD:
+		if (strcmp(method, "publickey") == 0 ||
+		    strcmp(method, "hostbased") == 0 ||
+		    strcmp(method, "gssapi-with-mic") == 0)
+			return 1;
+		break;
+	case PERMIT_FORCED_ONLY:
+		if (auth_opts->force_command != NULL) {
+			logit("Root login accepted for forced command.");
+			return 1;
+		}
+		break;
+	}
+	logit("ROOT LOGIN REFUSED FROM %.200s port %d",
+	    ssh_remote_ipaddr(ssh), ssh_remote_port(ssh));
+	return 0;
 }
