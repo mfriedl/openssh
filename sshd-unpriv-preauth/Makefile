@@ -4,7 +4,7 @@
 
 SRCS=	sshd-unpriv-preauth.c auth2-methods.c \
 	auth-rhosts.c sshpty.c sshlogin.c servconf.c \
-	auth.c auth2.c auth-log.c auth-options.c auth2-chall.c \
+	auth.c auth2.c auth2-userauth.c auth-log.c auth-options.c auth2-chall.c \
 	groupaccess.c auth-bsdauth.c auth2-hostbased.c auth2-kbdint.c \
 	auth2-none.c auth2-passwd.c auth2-pubkey.c auth2-pubkeyfile.c \
 	monitor_wrap.c

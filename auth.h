@@ -134,6 +134,11 @@ int	 user_key_allowed(struct ssh *ssh, struct passwd *, struct sshkey *,
     int, struct sshauthopt **);
 int	 auth2_key_already_used(Authctxt *, const struct sshkey *);
 
+/* Lookup */
+Authmethod *authmethod_byname(const char *);
+Authmethod *authmethod_lookup(Authctxt *, const char *);
+char *authmethods_get(Authctxt *authctxt);
+
 /*
  * Handling auth method-specific information for logging and prevention
  * of key reuse during multiple authentication.
