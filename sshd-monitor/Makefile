@@ -2,14 +2,21 @@
 
 .PATH:		${.CURDIR}/..
 
-SRCS=	sshd-monitor.c auth2-methods.c \
-	auth-rhosts.c auth-passwd.c sshpty.c sshlogin.c servconf.c \
-	auth.c auth2.c auth2-banner.c auth-log.c auth-options.c \
-	groupaccess.c auth-bsdauth-monitor.c auth2-kbdint-monitor.c \
+SRCS=	sshd-monitor.c monitor.c monitor_wrap.c
+# auth shared
+SRCS+=  auth2-methods.c
+SRCS+=	auth-log.c auth-options.c auth2.c
+# auth monitor-only
+SRCS+=	auth.c \
+	auth-passwd.c \
+	auth-rhosts.c \
+	auth-bsdauth-monitor.c \
+	auth2-banner.c \
+	auth2-kbdint-monitor.c \
 	auth2-hostbased-monitor.c \
-	auth2-pubkey-monitor.c auth2-pubkeyfile.c \
-	monitor.c monitor_wrap.c \
-	dh.c
+	auth2-pubkey-monitor.c \
+	auth2-pubkeyfile.c
+SRCS+=	sshpty.c sshlogin.c servconf.c groupaccess.c dh.c
 SRCS+=	authfd.c compat.c dns.c fatal.c hostfile.c readpass.c utf8.c uidswap.c
 SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} \
 	${SRCS_KRL} ${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \
