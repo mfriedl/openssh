@@ -79,7 +79,7 @@ login_cap_t *lc;
  * If the user's shell is not executable, false will be returned.
  * Otherwise true is returned.
  */
-int
+static int
 allowed_user(struct ssh *ssh, struct passwd * pw)
 {
 	struct stat st;

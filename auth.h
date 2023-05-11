@@ -174,7 +174,6 @@ void	auth2_challenge_stop(struct ssh *);
 int	bsdauth_query(void *, char **, char **, u_int *, char ***, u_int **);
 int	bsdauth_respond(void *, u_int, char **);
 
-int	allowed_user(struct ssh *, struct passwd *);
 struct passwd * getpwnamallow(struct ssh *, const char *user);
 
 int	 auth_key_is_revoked(struct sshkey *);
