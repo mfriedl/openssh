@@ -104,14 +104,17 @@ SRCS_KEYP+=	atomicio.c
 SRCS_KRL+=	bitmap.c
 SRCS_KRL+=	krl.c
 
+SRCS_MAC+=	mac.c
+SRCS_MAC+=	hmac.c
+SRCS_MAC+=	umac.c
+SRCS_MAC+=	umac128.c
+
 SRCS_PKT+=	canohost.c
 SRCS_PKT+=	dispatch.c
-SRCS_PKT+=	hmac.c
 SRCS_PKT+=	kex.c
-SRCS_PKT+=	mac.c
+SRCS_PKT+=	kex-names.c
 SRCS_PKT+=	packet.c
-SRCS_PKT+=	umac.c
-SRCS_PKT+=	umac128.c
+SRCS_PKT+=	${SRCS_MAC}
 
 SRCS_PROT+=	channels.c
 SRCS_PROT+=	monitor_fdpass.c

@@ -295,7 +295,6 @@ TAILQ_HEAD(include_list, include_item);
 		M_CP_STRARRAYOPT(log_verbose, num_log_verbose); \
 	} while (0)
 
-struct connection_info *get_connection_info(struct ssh *, int, int);
 void	 initialize_server_options(ServerOptions *);
 void	 fill_default_server_options(ServerOptions *);
 int	 process_server_config_line(ServerOptions *, char *, const char *, int,

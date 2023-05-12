@@ -514,7 +514,7 @@ main(int ac, char **av)
 			fatal("test/dump modes not supported");
 			break;
 		case 'C':
-			connection_info = get_connection_info(ssh, 0, 0);
+			connection_info = server_get_connection_info(ssh, 0, 0);
 			if (parse_server_match_testspec(connection_info,
 			    optarg) == -1)
 				exit(1);

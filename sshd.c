@@ -840,12 +840,6 @@ prepare_proctitle(int ac, char **av)
 static void
 print_config(struct connection_info *connection_info)
 {
-	/*
-	 * If no connection info was provided by -C then use
-	 * use a blank one that will cause no predicate to match.
-	 */
-	if (connection_info == NULL)
-		connection_info = get_connection_info(NULL, 0, 0);
 	connection_info->test = 1;
 	parse_server_match_config(&options, &includes, connection_info);
 	dump_config(&options);
@@ -864,15 +858,17 @@ main(int ac, char **av)
 	char *config_file_name = _PATH_SERVER_CONFIG_FILE;
 	int r, opt, do_dump_cfg = 0, keytype, already_daemon, have_agent = 0;
 	int sock_in = -1, sock_out = -1, newsock = -1, rexec_argc = 0;
+	int config_s[2] = { -1 , -1 }, have_connection_info = 0;
 	char *fp, *line, *logfile = NULL, **rexec_argv = NULL;
 	struct stat sb;
-	int config_s[2] = { -1 , -1 };
 	u_int i, j;
 	mode_t new_umask;
 	struct sshkey *key;
 	struct sshkey *pubkey;
-	struct connection_info *connection_info = NULL;
+	struct connection_info connection_info;
 	sigset_t sigmask;
+
+	memset(&connection_info, 0, sizeof(connection_info));
 
 	sigemptyset(&sigmask);
 	sigprocmask(SIG_SETMASK, &sigmask, NULL);
@@ -973,10 +969,10 @@ main(int ac, char **av)
 			test_flag = 2;
 			break;
 		case 'C':
-			connection_info = get_connection_info(NULL, 0, 0);
-			if (parse_server_match_testspec(connection_info,
+			if (parse_server_match_testspec(&connection_info,
 			    optarg) == -1)
 				exit(1);
+			have_connection_info = 1;
 			break;
 		case 'u':
 			utmp_len = (u_int)strtonum(optarg, 0, HOST_NAME_MAX+1+1, NULL);
@@ -1039,7 +1035,7 @@ main(int ac, char **av)
 	 * If we're not doing an extended test do not silently ignore connection
 	 * test params.
 	 */
-	if (test_flag < 2 && connection_info != NULL)
+	if (test_flag < 2 && have_connection_info)
 		fatal("Config test connection parameter (-C) provided without "
 		    "test mode (-T)");
 
@@ -1093,7 +1089,7 @@ main(int ac, char **av)
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
 
 	if (do_dump_cfg)
-		print_config(connection_info);
+		print_config(&connection_info);
 
 	/* load host keys */
 	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
@@ -1259,7 +1255,7 @@ main(int ac, char **av)
 		    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
 
 	if (test_flag > 1)
-		print_config(connection_info);
+		print_config(&connection_info);
 
 	/* Configuration looks good, so exit if in test mode. */
 	if (test_flag)

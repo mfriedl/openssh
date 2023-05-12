@@ -201,7 +201,7 @@ getpwnamallow(struct ssh *ssh, const char *user)
 	struct connection_info *ci;
 	u_int i;
 
-	ci = get_connection_info(ssh, 1, options.use_dns);
+	ci = server_get_connection_info(ssh, 1, options.use_dns);
 	ci->user = user;
 	parse_server_match_config(&options, &includes, ci);
 	log_change_level(options.log_level);

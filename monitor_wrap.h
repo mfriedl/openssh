@@ -92,5 +92,7 @@ int mm_bsdauth_respond(void *, u_int, char **);
 /* config / channels glue */
 void	 server_process_permitopen(struct ssh *);
 void	 server_process_channel_timeouts(struct ssh *ssh);
+struct connection_info *
+	 server_get_connection_info(struct ssh *, int, int);
 
 #endif /* _MM_WRAP_H_ */
