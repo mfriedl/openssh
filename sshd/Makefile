@@ -4,7 +4,7 @@
 
 SRCS=	sshd.c servconf.c sshpty.c srclimit.c groupaccess.c auth2-methods.c
 SRCS+=	dns.c fatal.c compat.c utf8.c authfd.c canohost.c kex-names.c
-SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} ${SRCS_KRL} \
+SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} \
 	${SRCS_MAC} ${SRCS_UTL} ${SRCS_SK_CLIENT}
 
 PROG=	sshd

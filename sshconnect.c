@@ -55,6 +55,7 @@
 #include "authfile.h"
 #include "ssherr.h"
 #include "authfd.h"
+#include "krl.h"
 #include "kex.h"
 
 struct sshkey *previous_host_key = NULL;
@@ -1440,7 +1441,7 @@ verify_host_key(char *host, struct sockaddr *hostaddr, struct sshkey *host_key,
 
 	/* Check in RevokedHostKeys file if specified */
 	if (options.revoked_host_keys != NULL) {
-		r = sshkey_check_revoked(host_key, options.revoked_host_keys);
+		r = ssh_krl_check_revoked(host_key, options.revoked_host_keys);
 		switch (r) {
 		case 0:
 			break; /* not revoked */

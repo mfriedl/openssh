@@ -2798,8 +2798,8 @@ sig_verify(const char *signature, const char *sig_namespace,
 	fp = NULL;
 
 	if (revoked_keys != NULL) {
-		if ((r = sshkey_check_revoked(sign_key, revoked_keys)) != 0) {
-			debug3_fr(r, "sshkey_check_revoked");
+		if ((r = ssh_krl_check_revoked(sign_key, revoked_keys)) != 0) {
+			debug3_fr(r, "ssh_krl_check_revoked");
 			goto done;
 		}
 	}

@@ -62,6 +62,7 @@
 #include "monitor_wrap.h"
 #include "ssherr.h"
 #include "channels.h"
+#include "krl.h"
 
 /* import */
 extern ServerOptions options;
@@ -250,7 +251,7 @@ auth_key_is_revoked(struct sshkey *key)
 		goto out;
 	}
 
-	r = sshkey_check_revoked(key, options.revoked_keys_file);
+	r = ssh_krl_check_revoked(key, options.revoked_keys_file);
 	switch (r) {
 	case 0:
 		break; /* not revoked */

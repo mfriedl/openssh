@@ -46,7 +46,6 @@ int sshkey_load_private_type_fd(int fd, int type, const char *passphrase,
     struct sshkey **keyp, char **commentp);
 int sshkey_perm_ok(int, const char *);
 int sshkey_in_file(struct sshkey *, const char *, int, int);
-int sshkey_check_revoked(struct sshkey *key, const char *revoked_keys_file);
 int sshkey_advance_past_options(char **cpp);
 int sshkey_save_public(const struct sshkey *key, const char *path,
     const char *comment);
