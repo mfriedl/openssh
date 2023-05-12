@@ -85,9 +85,6 @@ extern char *__progname;
 /* Server configuration options. */
 ServerOptions options;
 
-/* Name of the server configuration file. */
-char *config_file_name = _PATH_SERVER_CONFIG_FILE;
-
 /*
  * Debug mode flag.  This can be set on the command line.  If debug
  * mode is enabled, extra debugging output will be sent to the system
@@ -96,29 +93,8 @@ char *config_file_name = _PATH_SERVER_CONFIG_FILE;
  */
 int debug_flag = 0;
 
-/*
- * Indicating that the daemon should only test the configuration and keys.
- * If test_flag > 1 ("-T" flag), then sshd will also dump the effective
- * configuration, optionally using connection information provided by the
- * "-C" flag.
- */
-static int test_flag = 0;
-
-/* Flag indicating that the daemon is being started from inetd. */
-static int inetd_flag = 0;
-
-/* Flag indicating that sshd should not detach and become a daemon. */
-static int no_daemon_flag = 0;
-
-/* debug goes to stderr unless inetd_flag is set */
-static int log_stderr = 0;
-
 /* Saved arguments to main(). */
 static char **saved_argv;
-
-/* re-exec */
-static int rexec_argc = 0;
-static char **rexec_argv;
 
 /*
  * The sockets that the server is listening; this is used in the SIGHUP
@@ -127,9 +103,6 @@ static char **rexec_argv;
 #define	MAX_LISTEN_SOCKS	16
 static int listen_socks[MAX_LISTEN_SOCKS];
 static int num_listen_socks = 0;
-
-/* Daemon's agent connection */
-static int have_agent = 0;
 
 /*
  * Any really sensitive data in the application is contained in this
@@ -173,10 +146,6 @@ u_int utmp_len = HOST_NAME_MAX+1;
 static int *startup_pipes = NULL;
 static int *startup_flags = NULL;	/* Indicates child closed listener */
 static int startup_pipe = -1;		/* in child */
-
-/* global connection state and authentication contexts */
-Authctxt *the_authctxt = NULL;
-struct ssh *the_active_state;
 
 /* sshd_config buffer */
 struct sshbuf *cfg;
@@ -570,7 +539,8 @@ server_listen(void)
  * from this function are in a forked subprocess.
  */
 static void
-server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s)
+server_accept_loop(int *sock_in, int *sock_out, int *newsock, int *config_s,
+    int log_stderr)
 {
 	struct pollfd *pfd = NULL;
 	int i, j, ret, npfd;
@@ -863,14 +833,14 @@ prepare_proctitle(int ac, char **av)
 }
 
 static void
-print_config(struct ssh *ssh, struct connection_info *connection_info)
+print_config(struct connection_info *connection_info)
 {
 	/*
 	 * If no connection info was provided by -C then use
 	 * use a blank one that will cause no predicate to match.
 	 */
 	if (connection_info == NULL)
-		connection_info = get_connection_info(ssh, 0, 0);
+		connection_info = get_connection_info(NULL, 0, 0);
 	connection_info->test = 1;
 	parse_server_match_config(&options, &includes, connection_info);
 	dump_config(&options);
@@ -883,19 +853,19 @@ print_config(struct ssh *ssh, struct connection_info *connection_info)
 int
 main(int ac, char **av)
 {
-	struct ssh *ssh = NULL;
 	extern char *optarg;
 	extern int optind;
-	int r, opt, do_dump_cfg = 0, already_daemon;
-	int sock_in = -1, sock_out = -1, newsock = -1;
-	char *fp, *line, *logfile = NULL;
+	int log_stderr = 0, inetd_flag = 0, test_flag = 0, no_daemon_flag = 0;
+	char *config_file_name = _PATH_SERVER_CONFIG_FILE;
+	int r, opt, do_dump_cfg = 0, keytype, already_daemon, have_agent = 0;
+	int sock_in = -1, sock_out = -1, newsock = -1, rexec_argc = 0;
+	char *fp, *line, *logfile = NULL, **rexec_argv = NULL;
 	struct stat sb;
 	int config_s[2] = { -1 , -1 };
 	u_int i, j;
 	mode_t new_umask;
 	struct sshkey *key;
 	struct sshkey *pubkey;
-	int keytype;
 	struct connection_info *connection_info = NULL;
 	sigset_t sigmask;
 
@@ -998,7 +968,7 @@ main(int ac, char **av)
 			test_flag = 2;
 			break;
 		case 'C':
-			connection_info = get_connection_info(ssh, 0, 0);
+			connection_info = get_connection_info(NULL, 0, 0);
 			if (parse_server_match_testspec(connection_info,
 			    optarg) == -1)
 				exit(1);
@@ -1118,7 +1088,7 @@ main(int ac, char **av)
 	debug("sshd version %s, %s", SSH_VERSION, SSH_OPENSSL_VERSION);
 
 	if (do_dump_cfg)
-		print_config(ssh, connection_info);
+		print_config(connection_info);
 
 	/* load host keys */
 	sensitive_data.host_keys = xcalloc(options.num_host_key_files,
@@ -1284,7 +1254,7 @@ main(int ac, char **av)
 		    "world-writable.", _PATH_PRIVSEP_CHROOT_DIR);
 
 	if (test_flag > 1)
-		print_config(ssh, connection_info);
+		print_config(connection_info);
 
 	/* Configuration looks good, so exit if in test mode. */
 	if (test_flag)
@@ -1393,7 +1363,7 @@ main(int ac, char **av)
 
 		/* Accept a connection and return in a forked child */
 		server_accept_loop(&sock_in, &sock_out,
-		    &newsock, config_s);
+		    &newsock, config_s, log_stderr);
 	}
 
 	/* This is the child processing a new connection. */
