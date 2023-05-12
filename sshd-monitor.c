@@ -1069,12 +1069,6 @@ main(int ac, char **av)
 
 	check_ip_options(ssh);
 
-	/* Prepare the channels layer */
-	channel_init_channels(ssh);
-	channel_set_af(ssh, options.address_family);
-	server_process_channel_timeouts(ssh);
-	server_process_permitopen(ssh);
-
 	/* Set SO_KEEPALIVE if requested. */
 	if (options.tcp_keep_alive && ssh_packet_connection_is_on_socket(ssh) &&
 	    setsockopt(sock_in, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)) == -1)

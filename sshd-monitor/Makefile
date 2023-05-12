@@ -2,7 +2,7 @@
 
 .PATH:		${.CURDIR}/..
 
-SRCS=	sshd-monitor.c monitor.c monitor_wrap.c
+SRCS=	sshd-monitor.c monitor.c monitor_msg.c monitor_fdpass.c
 # auth shared
 SRCS+=  auth2-methods.c
 SRCS+=	auth-log.c auth-options.c auth2.c
@@ -19,7 +19,7 @@ SRCS+=	auth.c \
 SRCS+=	sshpty.c sshlogin.c servconf.c groupaccess.c dh.c
 SRCS+=	authfd.c compat.c dns.c fatal.c hostfile.c readpass.c utf8.c uidswap.c
 SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} \
-	${SRCS_KRL} ${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \
+	${SRCS_KRL} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_PKCS11} \
 	${SRCS_SK_CLIENT}
 
 PROG=	sshd-monitor

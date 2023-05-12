@@ -5,7 +5,7 @@
 SRCS=	sshd-unpriv-postauth.c auth2-methods.c \
 	sshpty.c sshlogin.c servconf.c \
 	serverloop.c auth-log.c auth-options.c \
-	session.c groupaccess.c monitor_wrap.c \
+	session.c groupaccess.c monitor_wrap.c monitor_msg.c \
 	sftp-server.c sftp-common.c sftp-realpath.c
 SRCS+=	compat.c dns.c fatal.c hostfile.c readpass.c utf8.c uidswap.c
 SRCS+=	atomicio.c
