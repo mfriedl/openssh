@@ -389,7 +389,7 @@ send_rexec_state(int fd, struct sshbuf *conf)
 {
 	struct sshbuf *m = NULL, *inc = NULL, *hostkeys = NULL;
 	struct include_item *item = NULL;
-	int r;
+	int r, sz;
 
 	debug3_f("entering fd = %d config len %zu", fd,
 	    sshbuf_len(conf));
@@ -428,6 +428,11 @@ send_rexec_state(int fd, struct sshbuf *conf)
 	    (r = sshbuf_put_stringb(m, hostkeys)) != 0 ||
 	    (r = sshbuf_put_stringb(m, inc)) != 0)
 		fatal_fr(r, "compose config");
+
+	/* We need to fit the entire message inside the socket send buffer */
+	sz = ROUNDUP(sshbuf_len(m) + 5, 16*1024);
+	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz) == -1)
+		fatal_f("setsockopt SO_SNDBUF: %s", strerror(errno));
 
 	if (ssh_msg_send(fd, 0, m) == -1)
 		error_f("ssh_msg_send failed");
@@ -1328,14 +1333,7 @@ main(int ac, char **av)
 		/* Send configuration to ancestor sshd-monitor process */
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, config_s) == -1)
 			fatal("socketpair: %s", strerror(errno));
-		switch (fork()) {
-		case -1:
-			fatal("fork (inetd mode) failed: %s", strerror(errno));
-		case 0:
-			/* child: send state and exit */
-			send_rexec_state(config_s[0], cfg);
-			_exit(0);
-		}
+		send_rexec_state(config_s[0], cfg);
 		close(config_s[0]);
 	} else {
 		server_listen();
