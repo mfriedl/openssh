@@ -85,13 +85,6 @@
 /* -- agent forwarding */
 #define	NUM_SOCKS	10
 
-/* -- tcp forwarding */
-/* special-case port number meaning allow any port */
-#define FWD_PERMIT_ANY_PORT	0
-
-/* special-case wildcard meaning allow any host */
-#define FWD_PERMIT_ANY_HOST	"*"
-
 /* -- X11 forwarding */
 /* Maximum number of fake X11 displays to try. */
 #define MAX_DISPLAYS  1000
@@ -4453,19 +4446,6 @@ channel_update_permission(struct ssh *ssh, int idx, int newport)
 		pset->permitted_user[idx].listen_port =
 		    (ssh->compat & SSH_BUG_DYNAMIC_RPORT) ? 0 : newport;
 	}
-}
-
-/* returns port number, FWD_PERMIT_ANY_PORT or -1 on error */
-int
-permitopen_port(const char *p)
-{
-	int port;
-
-	if (strcmp(p, "*") == 0)
-		return FWD_PERMIT_ANY_PORT;
-	if ((port = a2port(p)) > 0)
-		return port;
-	return -1;
 }
 
 /* Try to start non-blocking connect to next host in cctx list */

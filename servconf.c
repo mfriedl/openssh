@@ -860,63 +860,9 @@ process_queued_listen_addrs(ServerOptions *options)
 	options->num_queued_listens = 0;
 }
 
-/*
- * Inform channels layer of permitopen options for a single forwarding
- * direction (local/remote).
- */
-static void
-process_permitopen_list(struct ssh *ssh, ServerOpCodes opcode,
-    char **opens, u_int num_opens)
-{
-	u_int i;
-	int port;
-	char *host, *arg, *oarg;
-	int where = opcode == sPermitOpen ? FORWARD_LOCAL : FORWARD_REMOTE;
-	const char *what = lookup_opcode_name(opcode);
-
-	channel_clear_permission(ssh, FORWARD_ADM, where);
-	if (num_opens == 0)
-		return; /* permit any */
-
-	/* handle keywords: "any" / "none" */
-	if (num_opens == 1 && strcmp(opens[0], "any") == 0)
-		return;
-	if (num_opens == 1 && strcmp(opens[0], "none") == 0) {
-		channel_disable_admin(ssh, where);
-		return;
-	}
-	/* Otherwise treat it as a list of permitted host:port */
-	for (i = 0; i < num_opens; i++) {
-		oarg = arg = xstrdup(opens[i]);
-		host = hpdelim(&arg);
-		if (host == NULL)
-			fatal_f("missing host in %s", what);
-		host = cleanhostname(host);
-		if (arg == NULL || ((port = permitopen_port(arg)) < 0))
-			fatal_f("bad port number in %s", what);
-		/* Send it to channels layer */
-		channel_add_permission(ssh, FORWARD_ADM,
-		    where, host, port);
-		free(oarg);
-	}
-}
-
-/*
- * Inform channels layer of permitopen options from configuration.
- */
-void
-process_permitopen(struct ssh *ssh, ServerOptions *options)
-{
-	process_permitopen_list(ssh, sPermitOpen,
-	    options->permitted_opens, options->num_permitted_opens);
-	process_permitopen_list(ssh, sPermitListen,
-	    options->permitted_listens,
-	    options->num_permitted_listens);
-}
-
 /* Parse a ChannelTimeout clause "pattern=interval" */
-static int
-parse_timeout(const char *s, char **typep, u_int *secsp)
+int
+parse_channel_timeout(const char *s, char **typep, u_int *secsp)
 {
 	char *cp, *sdup;
 	int secs;
@@ -945,25 +891,6 @@ parse_timeout(const char *s, char **typep, u_int *secsp)
 		*secsp = (u_int)secs;
 	free(sdup);
 	return 0;
-}
-
-void
-process_channel_timeouts(struct ssh *ssh, ServerOptions *options)
-{
-	u_int i, secs;
-	char *type;
-
-	debug3_f("setting %u timeouts", options->num_channel_timeouts);
-	channel_clear_timeouts(ssh);
-	for (i = 0; i < options->num_channel_timeouts; i++) {
-		if (parse_timeout(options->channel_timeouts[i],
-		    &type, &secs) != 0) {
-			fatal_f("internal error: bad timeout %s",
-			    options->channel_timeouts[i]);
-		}
-		channel_add_timeout(ssh, type, secs);
-		free(type);
-	}
 }
 
 struct connection_info *
@@ -2475,7 +2402,8 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 					    filename, linenum, keyword);
 					goto out;
 				}
-			} else if (parse_timeout(arg, NULL, NULL) != 0) {
+			} else if (parse_channel_timeout(arg,
+			    NULL, NULL) != 0) {
 				fatal("%s line %d: invalid channel timeout %s",
 				    filename, linenum, arg);
 			}

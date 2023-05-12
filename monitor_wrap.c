@@ -61,7 +61,6 @@
 #ifdef GSSAPI
 #include "ssh-gss.h"
 #endif
-#include "monitor_wrap.h"
 #include "atomicio.h"
 #include "monitor_fdpass.h"
 #include "misc.h"
@@ -69,6 +68,7 @@
 #include "channels.h"
 #include "session.h"
 #include "servconf.h"
+#include "monitor_wrap.h"
 
 #include "ssherr.h"
 
@@ -327,8 +327,8 @@ mm_getpwnamallow(struct ssh *ssh, const char *username)
 out:
 	/* copy options block as a Match directive may have changed some */
 	mm_decode_activate_server_options(ssh, m);
-	process_permitopen(ssh, &options);
-	process_channel_timeouts(ssh, &options);
+	server_process_permitopen(ssh);
+	server_process_channel_timeouts(ssh);
 
 	sshbuf_free(m);
 
@@ -880,3 +880,75 @@ mm_ssh_gssapi_userok(char *user)
 	return (authenticated);
 }
 #endif /* GSSAPI */
+
+/*
+ * Inform channels layer of permitopen options for a single forwarding
+ * direction (local/remote).
+ */
+static void
+server_process_permitopen_list(struct ssh *ssh, int listen,
+    char **opens, u_int num_opens)
+{
+	u_int i;
+	int port;
+	char *host, *arg, *oarg;
+	int where = listen ? FORWARD_REMOTE : FORWARD_LOCAL;
+	const char *what = listen ? "permitlisten" : "permitopen";
+
+	channel_clear_permission(ssh, FORWARD_ADM, where);
+	if (num_opens == 0)
+		return; /* permit any */
+
+	/* handle keywords: "any" / "none" */
+	if (num_opens == 1 && strcmp(opens[0], "any") == 0)
+		return;
+	if (num_opens == 1 && strcmp(opens[0], "none") == 0) {
+		channel_disable_admin(ssh, where);
+		return;
+	}
+	/* Otherwise treat it as a list of permitted host:port */
+	for (i = 0; i < num_opens; i++) {
+		oarg = arg = xstrdup(opens[i]);
+		host = hpdelim(&arg);
+		if (host == NULL)
+			fatal_f("missing host in %s", what);
+		host = cleanhostname(host);
+		if (arg == NULL || ((port = permitopen_port(arg)) < 0))
+			fatal_f("bad port number in %s", what);
+		/* Send it to channels layer */
+		channel_add_permission(ssh, FORWARD_ADM,
+		    where, host, port);
+		free(oarg);
+	}
+}
+
+/*
+ * Inform channels layer of permitopen options from configuration.
+ */
+void
+server_process_permitopen(struct ssh *ssh)
+{
+	server_process_permitopen_list(ssh, 0,
+	    options.permitted_opens, options.num_permitted_opens);
+	server_process_permitopen_list(ssh, 1,
+	    options.permitted_listens, options.num_permitted_listens);
+}
+
+void
+server_process_channel_timeouts(struct ssh *ssh)
+{
+	u_int i, secs;
+	char *type;
+
+	debug3_f("setting %u timeouts", options.num_channel_timeouts);
+	channel_clear_timeouts(ssh);
+	for (i = 0; i < options.num_channel_timeouts; i++) {
+		if (parse_channel_timeout(options.channel_timeouts[i],
+		    &type, &secs) != 0) {
+			fatal_f("internal error: bad timeout %s",
+			    options.channel_timeouts[i]);
+		}
+		channel_add_timeout(ssh, type, secs);
+		free(type);
+	}
+}

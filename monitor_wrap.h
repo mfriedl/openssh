@@ -89,4 +89,8 @@ void mm_get_state(struct ssh *, struct include_list *, struct sshbuf *,
 int mm_bsdauth_query(void *, char **, char **, u_int *, char ***, u_int **);
 int mm_bsdauth_respond(void *, u_int, char **);
 
+/* config / channels glue */
+void	 server_process_permitopen(struct ssh *);
+void	 server_process_channel_timeouts(struct ssh *ssh);
+
 #endif /* _MM_WRAP_H_ */

@@ -5,7 +5,7 @@
 SRCS=	sshd.c servconf.c sshpty.c srclimit.c groupaccess.c auth2-methods.c
 SRCS+=	dns.c fatal.c compat.c utf8.c authfd.c
 SRCS+=	${SRCS_BASE} ${SRCS_KEY} ${SRCS_KEYP} ${SRCS_KRL} \
-	${SRCS_PROT} ${SRCS_PKT} ${SRCS_UTL} ${SRCS_SK_CLIENT}
+	${SRCS_PKT} ${SRCS_UTL} ${SRCS_SK_CLIENT}
 
 PROG=	sshd
 BINMODE=511

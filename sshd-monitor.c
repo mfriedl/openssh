@@ -1072,8 +1072,8 @@ main(int ac, char **av)
 	/* Prepare the channels layer */
 	channel_init_channels(ssh);
 	channel_set_af(ssh, options.address_family);
-	process_channel_timeouts(ssh, &options);
-	process_permitopen(ssh, &options);
+	server_process_channel_timeouts(ssh);
+	server_process_permitopen(ssh);
 
 	/* Set SO_KEEPALIVE if requested. */
 	if (options.tcp_keep_alive && ssh_packet_connection_is_on_socket(ssh) &&

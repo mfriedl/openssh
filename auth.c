@@ -208,7 +208,7 @@ getpwnamallow(struct ssh *ssh, const char *user)
 	log_verbose_reset();
 	for (i = 0; i < options.num_log_verbose; i++)
 		log_verbose_add(options.log_verbose[i]);
-	process_permitopen(ssh, &options);
+	server_process_permitopen(ssh);
 
 	pw = getpwnam(user);
 	if (pw == NULL) {
