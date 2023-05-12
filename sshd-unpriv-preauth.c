@@ -76,7 +76,6 @@
 #include "canohost.h"
 #include "hostfile.h"
 #include "auth.h"
-#include "authfd.h"
 #include "msg.h"
 #include "dispatch.h"
 #include "channels.h"
@@ -118,10 +117,6 @@ static int inetd_flag = 0;
 
 /* Saved arguments to main(). */
 static char **saved_argv;
-
-/* Daemon's agent connection */
-int auth_sock = -1;
-static int have_agent = 0;
 
 u_int		num_hostkeys;
 struct sshkey	**host_pubkeys;		/* all public host keys */
@@ -426,7 +421,7 @@ main(int ac, char **av)
 	struct ssh *ssh = NULL;
 	extern char *optarg;
 	extern int optind;
-	int r, opt, have_key = 0;
+	int opt, have_key = 0;
 	int sock_in = -1, sock_out = -1, rexeced_flag = 0;
 	char *line, *logfile = NULL;
 	u_int i;
@@ -643,17 +638,6 @@ main(int ac, char **av)
 	if (options.moduli_file != NULL)
 		dh_set_moduli_file(options.moduli_file);
 #endif
-
-	if (options.host_key_agent) {
-		if (strcmp(options.host_key_agent, SSH_AUTHSOCKET_ENV_NAME))
-			setenv(SSH_AUTHSOCKET_ENV_NAME,
-			    options.host_key_agent, 1);
-		if ((r = ssh_get_authentication_socket(NULL)) == 0)
-			have_agent = 1;
-		else
-			error_r(r, "Could not connect to agent \"%s\"",
-			    options.host_key_agent);
-	}
 
 	if (options.num_host_key_files != num_hostkeys) {
 		fatal("internal error: hostkeys confused (config %u recvd %u)",

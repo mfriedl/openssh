@@ -1167,13 +1167,6 @@ do_pwchange(Session *s)
 static void
 child_close_fds(struct ssh *ssh)
 {
-	extern int auth_sock;
-
-	if (auth_sock != -1) {
-		close(auth_sock);
-		auth_sock = -1;
-	}
-
 	if (ssh_packet_get_connection_in(ssh) ==
 	    ssh_packet_get_connection_out(ssh))
 		close(ssh_packet_get_connection_in(ssh));
